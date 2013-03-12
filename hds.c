@@ -53,7 +53,6 @@ int main(int argc, char *argv[]) {
 //	}
 	//now wait for user input and process key-presses
 	process_user_response();
-
 	exit(EXIT_SUCCESS);
 }
 
@@ -71,7 +70,22 @@ void process_user_response() {
 		case KEY_F(4):
 			hds_shutdown();
 			break;
+		case KEY_F(1):
+		case KEY_F(2):
+		case KEY_F(3):
+		case KEY_F(5):
+		case KEY_F(6):
+		case KEY_F(7):
+		case KEY_F(8):
+		case KEY_F(9):
+		case KEY_F(10):
+		case KEY_F(11):
+		case KEY_F(12):
+			break;
 		default:
+			// if anything other than F4 was pressed inject it
+			// to entry widget.
+			injectCDKEntry(hds_state.read_input,ch);
 			//read anything from user
 			info = activateCDKEntry(hds_state.read_input, 0);
 			if (hds_state.read_input->exitType == vESCAPE_HIT) {

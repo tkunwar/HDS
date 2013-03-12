@@ -183,5 +183,5 @@ void destroy_cdkscreens();
 void display_help();
 long int gettime_in_nsecs();
 int open_log_file();
-static BINDFN_PROTO (XXXCB);
+
 #endif

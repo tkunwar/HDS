@@ -14,6 +14,7 @@ static int check_window_configuration();
 static void draw_input_window();
 static void create_cdkscreens();
 static void draw_console();
+static BINDFN_PROTO (XXXCB);
 //===============================================
 static int XXXCB(EObjectType cdktype GCC_UNUSED, void *object GCC_UNUSED,
 		void *clientData GCC_UNUSED, chtype key GCC_UNUSED) {
@@ -258,7 +259,6 @@ static int check_window_configuration() {
 static void draw_input_window() {
 	const char *lblText[2];
 	CDKLABEL *lblTitle = NULL;
-	int x_displacement = 0; //used for drawing actual label
 	//set the title bar
 	lblText[0] = "<C>Input";
 	lblTitle = newCDKLabel(hds_state.input_win.cdksptr, CENTER, TOP,

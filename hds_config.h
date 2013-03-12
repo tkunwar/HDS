@@ -85,11 +85,17 @@
  * @struct hds_config_t
  * @brief Structure for storing information loaded from configuration file.
  */
+struct process_config_t{
+	unsigned int pid; // will be populated later on
+	process_type_t type;
+	unsigned int memory_req;
+	unsigned int printer_req;
+	unsigned int scanner_req;
+	struct process_config_t *next;
+};
+
 struct hds_config_t {
-	int max_buff_size;
-	int swappiness;
-	bool cell_compaction_enabled;
-	unsigned int stats_refresh_rate; // in seconds
+	struct process_config_t *process_config_list; //list of processes loaded from config file.
 	char log_filename[200];
 } hds_config;
 

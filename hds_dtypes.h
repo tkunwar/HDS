@@ -6,7 +6,7 @@
 #define HDS_DTYPES_H_
 /**
  * @def HDS_OK
- * @brief Symbol meaning that a operation has completed sucessfully.
+ * @brief Symbol meaning that a operation has completed successfully.
  */
 #define HDS_OK 0
 /**
@@ -17,5 +17,10 @@ typedef enum{
 	off, /**< Signifies that value is reset */
 	on /**< Signifies that value is set */
 } ON_OFF;
+
+typedef enum{
+	USER_PROCESS,
+	RT_PROCESS
+}process_type_t;
 
 #endif /* HDS_DTYPES_H_ */

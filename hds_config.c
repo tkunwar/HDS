@@ -6,17 +6,15 @@
  */
 #include "hds_config.h"
 //-----------------------------------
-//defnie routine before using them
+//define routine before using them
 static void print_loaded_configs();
 //-----------------------------------
 /**
  * @brief Initialise hds_config structure with default values
  */
 static void init_hds_config() {
-	hds_config.cell_compaction_enabled = true;
-	hds_config.max_buff_size = 100;
-	hds_config.swappiness = 70;
-	hds_config.stats_refresh_rate = 1;
+	strncpy(hds_config.log_filename, "hds_output.log");
+	hds_config.process_config_list = NULL;
 }
 /**
  * @brief Display the configuration that has been parsed from the configuration
@@ -24,14 +22,11 @@ static void init_hds_config() {
  */
 static void print_loaded_configs() {
 	fprintf(stderr, "\nLoaded configs:");
-	fprintf(stderr, "\n\tmax_buffer_size: %d", hds_config.max_buff_size);
-	fprintf(stderr, "\n\tswappiness: %d", hds_config.swappiness);
-	if (hds_config.cell_compaction_enabled == true) {
-		fprintf(stderr, "\n\tcell_compaction_enabled: true");
-	} else {
-		fprintf(stderr, "\n\tcell_compaction_enabled: false");
-	}
+	fprintf(stderr, "\n\tlog_filename: %s", hds_config.log_filename);
 	fprintf(stderr, "\n");
+}
+void add_new_process_config(struct process_config_t node) {
+
 }
 /**
  * @brief Read configuration file
@@ -42,9 +37,13 @@ static void print_loaded_configs() {
  */
 int load_config() {
 	config_t cfg;
-	const char* s_val=NULL; // will be used to store string values
+	const char* s_val = NULL; // will be used to store string values
 	int val;
-	bool config_fallback_enabled = false;
+	config_setting_t *setting;
+	struct process_config_t tmp_config;
+	tmp_config.next = NULL
+	:
+
 	// initialize hds_config state
 	init_hds_config();
 
@@ -57,105 +56,37 @@ int load_config() {
 		config_destroy(&cfg);
 		return HDS_ERR_NO_CONFIG_FILE;
 	}
-	//read config_fallback_enabled field
-	if (config_lookup_string(&cfg, "config_fallback_enabled", &s_val)) {
-		if (strncmp(s_val, "true", 4) == 0) {
-			config_fallback_enabled = true;
-		}
-	} else {
-		fprintf(stderr, "\nWarning: Field conf_fallback_enabled not found in "
-				"config file");
-	}
-	//read max_buffer_size
-	if (config_lookup_int(&cfg, "max_buffer_size", &val)) {
-		// if loaded value is acceptable to us, then save it
-		if (val < 100) {
-			fprintf(stderr, "\nError: max_buffer_size is too small");
-			if (config_fallback_enabled == false) {
-				// this is unacceptable, abort
-				fprintf(stderr,
-						"\nConfiguration prohibits using default values."
-								" Exiting!");
-				return HDS_ERR_CONFIG_ABORT;
-			}
-		} else {
-			hds_config.max_buff_size = val;
-		}
-	} else {
-		fprintf(stderr, "\nWarning: Field max_buffer_size not found in config"
-				" file!");
-	}
-	//read swappiness field
-	if (config_lookup_int(&cfg, "swappiness", &val)) {
-		if (val >= 80 && val <= 95) {
-			fprintf(stderr,
-					"\nWarning: swappiness value is too high.\nPerformance may "
-							"be affected!");
-			hds_config.swappiness = val;
-		} else if (val > 95) {
-			fprintf(stderr, "\nError: swappiness value is too high.");
-			if (config_fallback_enabled == false) {
-				fprintf(stderr,
-						"\nConfiguration prohibits using default values."
-								" Exiting!");
-				return HDS_ERR_CONFIG_ABORT;
-			}
-		} else {
-			hds_config.swappiness = val;
-		}
-	} else {
-		fprintf(stderr,
-				"\nWarning: Field swappiness not found in config file!");
-	}
-	//read cell_compaction_enabled
-	if (config_lookup_string(&cfg, "cell_compaction_enabled", &s_val)) {
-		if (strncmp(s_val, "true", 4) == 0) {
-			hds_config.cell_compaction_enabled = true;
-		} else {
-			hds_config.cell_compaction_enabled = false;
-		}
-	} else {
-		fprintf(stderr, "\nWarning: Field cell_compaction_enabled not found"
-				" in config file!");
-	}
-	//read stats_refresh field
-	if (config_lookup_int(&cfg, "stats_refresh_rate", &val)) {
-		if (val < 0) {
-			fprintf(stderr, "\nWarning: Invalid value for stats_refresh_rate!");
-			if (config_fallback_enabled == false) {
-				fprintf(stderr,
-						"\nConfiguration prohibits using default values."
-								" Exiting!");
-				return HDS_ERR_CONFIG_ABORT;
-			}else{
-				hds_config.stats_refresh_rate =1;
-			}
-		} else {
-			hds_config.stats_refresh_rate = val;
-		}
-	} else {
-		fprintf(stderr,
-				"\nWarning: Field stats_refresh_rate not found in config file!");
-	}
 	// read log file name
-		if (config_lookup_string(&cfg, "log_filename", &s_val)) {
-			if (!s_val){
-				if (config_fallback_enabled == false) {
-					fprintf(stderr,
-							"\nConfiguration prohibits using default values."
-									" Exiting!");
-					return HDS_ERR_CONFIG_ABORT;
-				}else{
-					strcpy(hds_config.log_filename,"hds_output.log");
-				}
-			}else{
-					strcpy(hds_config.log_filename,s_val);
-				}
-		} else {
-			fprintf(stderr,
-					"\nError: Field log_filename not found in config file!");
-		}
+	if (config_lookup_string(&cfg, "log_filename", &s_val)) {
+		strcpy(hds_config.log_filename, s_val);
+	} else {
+		fprintf(stderr,
+				"\nError: Field log_filename not found in config file! Using default: %s",
+				hds_config.log_filename);
+	}
+
+	//lets read other values
+	setting = config_lookup(&cfg, "process_list");
+	if(setting != NULL)
+	  {
+	    int count = config_setting_length(setting);
+	    int i;
+
+	    for(i = 0; i < count; ++i)
+	    {
+	      config_setting_t *process_config_from_file = config_setting_get_elem(setting, i);
+
+	      /* Only output the record if all of the expected fields are present. */
+	      if(!(config_setting_lookup_int(process_config_from_file, "type", &tmp_config.type)
+	           && config_setting_lookup_int(process_config_from_file, "memory_req", &tmp_config.memory_req)
+	           && config_setting_lookup_int(process_config_from_file, "printer_req", &tmp_config.printer_req)
+	           && config_setting_lookup_int(process_config_from_file, "scanner_req", &tmp_config.scanner_req)))
+	        continue;
+
+	    }
+	    putchar('\n');
+	  }
 	config_destroy(&cfg);
-//	print_loaded_configs();
+	print_loaded_configs();
 	return HDS_OK;
 }

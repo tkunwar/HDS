@@ -50,6 +50,7 @@ int init_curses() {
 	if (NOECHO)
 		noecho(); //disable echoing
 
+	hds_state.curses_ready = true;
 	return HDS_OK;
 }
 /**

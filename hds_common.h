@@ -77,6 +77,7 @@ struct HDS_STATE {
 	// ----------global labels------------------------
 	bool color_ok;
 	char log_buffer[LOG_BUFF_SIZE];
+	bool curses_ready;
 	bool gui_ready;
 	int hori_pad, vert_pad;
 

@@ -14,6 +14,7 @@
 
 #include<stdio.h>
 #include<unistd.h>
+#include <stdlib.h>
 #include <string.h>
 #include "libconfig.h"
 #include <stdbool.h>
@@ -86,20 +87,29 @@
  * @brief Structure for storing information loaded from configuration file.
  */
 struct process_config_t{
-	unsigned int pid; // will be populated later on
+	int pid; // will be populated later on
 	process_type_t type;
-	unsigned int memory_req;
-	unsigned int printer_req;
-	unsigned int scanner_req;
+	int memory_req;
+	int printer_req;
+	int scanner_req;
 	struct process_config_t *next;
 };
 
+struct max_resources_t{
+	int memory;
+	int printer;
+	int scanner;
+};
 struct hds_config_t {
 	struct process_config_t *process_config_list; //list of processes loaded from config file.
+	struct process_config_t *process_config_last_element;
+	struct max_resources_t max_resources;
 	char log_filename[200];
+	unsigned int process_id_counter;
 } hds_config;
 
 // --------routines-----------
 int load_config();
+void cleanup_process_config_list();
 #endif
 

@@ -38,6 +38,7 @@ int init_hds_state() {
 	init_cdks_pointers();
 	hds_state.color_ok = false;
 	hds_state.gui_ready = false;
+	hds_state.curses_ready = false;
 	hds_state.cursesWin = NULL;
 	/*
 	 * now for all three windows we set the cur_x and cur_y to 0
@@ -106,24 +107,32 @@ static void init_cdks_pointers() {
  * 			or error message.
  */
 void log_generic(const char* msg, log_level_t log_level) {
+	int msg_len = strlen(msg);
+	int beg_x = 0;
 	if (hds_state.gui_ready) {
 		//log this msg to console
 		log_msg_to_console(msg, log_level);
 		return;
+	} else if (hds_state.curses_ready) {
+
+		beg_x = calculate_msg_center_position(msg_len);
+		/*
+		 * if previously a message was logged, then logging this msg will
+		 * corrupt the display. so we will delete this line and write the msg
+		 */
+		move(LINES - 1, 0);
+		deleteln();
+		//donot forget to add horizontal padding
+		fprintf(hds_state.log_ptr, "%s\n", msg);
+		fflush(hds_state.log_ptr);
+		mvprintw(LINES - 1, beg_x + hds_state.hori_pad, "%s", msg);
+		refresh();
+		return;
+	} else {
+		fprintf(hds_state.log_ptr, "%s\n", msg);
+		// if no cdk , no curses then we have plain stderr.
+		fprintf(stderr, "%s", msg);
 	}
-	int msg_len = strlen(msg);
-	int beg_x = calculate_msg_center_position(msg_len);
-	/*
-	 * if previously a message was logged, then logging this msg will
-	 * corrupt the display. so we will delete this line and write the msg
-	 */
-	move(LINES - 1, 0);
-	deleteln();
-	//donot forget to add horizontal padding
-	fprintf(hds_state.log_ptr, "%s\n", msg);
-	fflush(hds_state.log_ptr);
-	mvprintw(LINES - 1, beg_x + hds_state.hori_pad, "%s", msg);
-	refresh();
 }
 
 /**
@@ -199,6 +208,7 @@ void close_ui() {
 
 	/* Exit CDK. */
 	endCDK();
+	refresh();
 	endwin();
 }
 /**

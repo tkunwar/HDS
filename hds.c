@@ -32,9 +32,9 @@ int main(int argc, char *argv[]) {
 		exit(EXIT_FAILURE);
 	}
 	//intialize configuration
-//	if (load_config() == HDS_ERR_CONFIG_ABORT) {
-//		exit(EXIT_FAILURE);
-//	}
+	if (load_config() == HDS_ERR_CONFIG_ABORT) {
+		exit(EXIT_FAILURE);
+	}
 	if (open_log_file() != HDS_OK) {
 		exit(EXIT_FAILURE);
 	}
@@ -129,6 +129,9 @@ void hds_shutdown() {
 //			fprintf(stderr,"\nError in collecting thread: cmm_main");
 //			exit(EXIT_FAILURE);
 //	}
+	//cleanup process config list
+	cleanup_process_config_list();
+
 	fclose(hds_state.log_ptr);
 	sigemptyset(&sigact.sa_mask);
 //	exit(EXIT_SUCCESS);

@@ -45,7 +45,7 @@ char *XCursesProgramName = "HOST";
  * @def LOG_BUFF_SIZE
  * @brief Size of log buffer used in logging macros.
  */
-#define LOG_BUFF_SIZE 200
+#define LOG_BUFF_SIZE 512
 #define HDS_PAGE_SIZE 4096
 /**
  * @struct window_state_t
@@ -77,6 +77,8 @@ struct HDS_STATE {
 	// ----------global labels------------------------
 	bool color_ok;
 	char log_buffer[LOG_BUFF_SIZE];
+	char result_msg[LOG_BUFF_SIZE];
+
 	bool curses_ready;
 	bool gui_ready;
 	int hori_pad, vert_pad;
@@ -84,6 +86,7 @@ struct HDS_STATE {
 	//cdk specific window pointers
 	CDK_PARAMS params;
 	CDKSWINDOW *console;
+	CDKSWINDOW *output_screen;
 	CDKSCREEN *master_screen;
 	WINDOW *cursesWin; //main curses window--stdscr
 	CDKENTRY *read_input;
@@ -94,6 +97,12 @@ struct HDS_STATE {
 	int recieved_signal_code;
 	FILE *log_ptr;
 } hds_state;
+
+#define sprint_result(s) snprintf(hds_state.result_msg, LOG_BUFF_SIZE,s );\
+		write_to_result_window(hds_state.result_msg,1);
+
+#define vprint_result(s,...) snprintf(hds_state.result_msg, LOG_BUFF_SIZE,s,__VA_ARGS__ );\
+		write_to_result_window(hds_state.result_msg,1);
 
 //some debug,warning and error macros
 /**
@@ -184,5 +193,5 @@ void destroy_cdkscreens();
 void display_help();
 long int gettime_in_nsecs();
 int open_log_file();
-
+void write_to_result_window(const char* msg,int num_rows);
 #endif

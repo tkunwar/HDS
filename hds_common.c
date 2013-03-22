@@ -73,6 +73,7 @@ int init_hds_state() {
 
 	hds_state.log_ptr = NULL;
 	hds_state.read_input = NULL;
+	hds_state.output_screen = NULL;
 	return HDS_OK;
 }
 int open_log_file() {
@@ -342,4 +343,10 @@ void gettime_in_mseconds() {
 	mtime = ((seconds) * 1000 + useconds / 1000.0) + 0.5;
 
 	printf("Elapsed time: %ld milliseconds\n", mtime);
+}
+void write_to_result_window(const char* msg,int num_rows){
+	/*
+	 * addCDKSWindow,cleanCDKSWindow and trimCDKSWindow should manage cdkswindows.
+	 */
+	addCDKSwindow(hds_state.output_screen, msg, BOTTOM);
 }

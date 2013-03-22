@@ -67,6 +67,14 @@ void process_user_response() {
 	//the main loop for waiting for key presses
 	while ((ch = getch())) {
 		switch (ch) {
+		case KEY_NPAGE: // pagedown
+			// pagedown key will be bound to output window
+			activateCDKSwindow(hds_state.console, 0);
+			break;
+		case KEY_PPAGE: //pageup
+			// pagedown key will be assigned to console window
+			activateCDKSwindow(hds_state.output_screen, 0);
+			break;
 		case KEY_F(4):
 			hds_shutdown();
 			break;
@@ -91,7 +99,8 @@ void process_user_response() {
 			if (hds_state.read_input->exitType == vESCAPE_HIT) {
 				sdebug("pressed ESC");
 			} else if (hds_state.read_input->exitType == vNORMAL) {
-				var_debug("Got: %s", info);
+				//write_to_result_window(info,1);
+				execute_commands(info);
 			}
 			cleanCDKEntry(hds_state.read_input);
 			break;
@@ -199,3 +208,14 @@ static void signal_handler(int sig) {
 //	}
 //	return ACP_OK;
 //}
+void execute_commands(const char *command){
+	if ( (strcmp(command,"help") ==0) || (strcmp(command,"HELP") ==0) ){
+		print_help();
+	}
+}
+void print_help(){
+	sprint_result("\t\tHelp Options for HOST Shell");
+	int num = 5;
+	vprint_result("num is %d",num);
+}
+

@@ -14,6 +14,8 @@ static int check_window_configuration();
 static void draw_input_window();
 static void create_cdkscreens();
 static void draw_console();
+static void draw_output_console();
+
 static BINDFN_PROTO (XXXCB);
 //===============================================
 static int XXXCB(EObjectType cdktype GCC_UNUSED, void *object GCC_UNUSED,
@@ -71,6 +73,7 @@ int hds_ui_main() {
 //	draw_info_window();
 	draw_input_window();
 	draw_console();
+	draw_output_console();
 	//set gui_ok in hds_state
 	hds_state.gui_ready = TRUE;
 	//every thing is fine so far
@@ -268,8 +271,8 @@ static void draw_input_window() {
 
 	//draw the input widget
 	hds_state.read_input = newCDKEntry(hds_state.input_win.cdksptr,
-			hds_state.input_win.cur_x+1,hds_state.input_win.cur_y+1, "", "<C>HDS>", A_NORMAL,
-			'.', vMIXED, 40, 0, 256,false,false);
+			hds_state.input_win.cur_x + 1, hds_state.input_win.cur_y + 1, "",
+			"<C>HDS>", A_NORMAL, '.', vMIXED, 40, 0, 256, false, false);
 
 	bindCDKObject(vENTRY, hds_state.read_input, '?', XXXCB, 0);
 
@@ -277,7 +280,28 @@ static void draw_input_window() {
 		serror("Failed to create input widget !!");
 		return;
 	}
-	refreshCDKScreen (hds_state.input_win.cdksptr);
+	refreshCDKScreen(hds_state.input_win.cdksptr);
+}
+/**
+ * @brief Draws result window.
+ */
+static void draw_output_console() {
+	const char *console_title = "<C></B/U/7>Results";
+	/* Create the scrolling window. */
+	hds_state.output_screen = newCDKSwindow(hds_state.output_win.cdksptr,
+			CDKparamValue(&hds_state.params, 'X', CENTER),
+			CDKparamValue(&hds_state.params, 'Y', CENTER),
+			CDKparamValue(&hds_state.params, 'H', hds_state.output_win.height),
+			CDKparamValue(&hds_state.params, 'W', hds_state.output_win.width),
+			console_title, 100, CDKparamValue(&hds_state.params, 'N', TRUE),
+			CDKparamValue(&hds_state.params, 'S', FALSE));
+
+	/* Is the window null. */
+	if (hds_state.output_screen == 0) {
+		report_error(HDS_ERR_CDK_CONSOLE_DRAW);
+	}
+	/* Draw the scrolling window. */
+	drawCDKSwindow(hds_state.output_screen, ObjOf (hds_state.output_screen)->box);
 }
 /**
  * @brief Draws console window.
@@ -289,7 +313,7 @@ static void draw_console() {
 			CDKparamValue(&hds_state.params, 'X', CENTER),
 			CDKparamValue(&hds_state.params, 'Y', CENTER),
 			CDKparamValue(&hds_state.params, 'H', hds_state.console_win.height),
-			CDKparamValue(&hds_state.params, 'W', hds_state.console_win.height),
+			CDKparamValue(&hds_state.params, 'W', hds_state.console_win.width),
 			console_title, 100, CDKparamValue(&hds_state.params, 'N', TRUE),
 			CDKparamValue(&hds_state.params, 'S', FALSE));
 

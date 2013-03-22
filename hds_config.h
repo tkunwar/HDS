@@ -46,13 +46,13 @@
  * @def OUTPUT_WINDOW_SIZE
  * @brief Size of status_window in no. of lines.
  */
-#define OUTPUT_WINDOW_SIZE 20
+#define OUTPUT_WINDOW_SIZE 22
 
 /**
  * @def INPUT_WINDOW_SIZE
  * @brief Size of input_window in no. of lines.
  */
-#define INPUT_WINDOW_SIZE 5
+#define INPUT_WINDOW_SIZE 3
 #define CONSOLE_SIZE 6
 
 

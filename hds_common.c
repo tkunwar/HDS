@@ -357,6 +357,9 @@ void execute_commands(const char *command){
 	}
 	else if ((strcmp(command,"print_config") == 0)){
 		print_loaded_configs();
+	}else{
+		clear_result_window();
+		vprint_result("<C></16>Command <%s> is not recognized !!<!16>",command);
 	}
 }
 void clear_result_window(){
@@ -364,19 +367,19 @@ void clear_result_window(){
 }
 void print_help(){
 	clear_result_window();
-	sprint_result("<C>tHelp Options for HOST Shell");
+	sprint_result("<C>Help Options for HOST Shell");
 	sprint_result("<C>---------------------------------------");
 	sprint_result("\tKeyboard shortcuts:");
 	sprint_result("\t\t F4 - Exit HOST");
 	sprint_result("\t\t PAGE_UP - Focus Result window");
-	sprint_result("\t\t PAGE_DOWN - Focus Cosnole window");
-	sprint_result("\t\t Press <ENTER> to mark one command.");
+	sprint_result("\t\t PAGE_DOWN - Focus Console window");
+	sprint_result("\t\t Press <ENTER> to complete one command.");
 	sprint_result(" ");
 	sprint_result("Following lists supported commands.");
 	sprint_result("\t\t</32>Command<!32>\t\t\t </24>Action<!24>");
 	sprint_result("\t\tprint_config\t Shows the list of processes loaded from config file.");
 	sprint_result(" ");
-	sprint_result("</16>Note:<!16> commands are case sensitive.");
+	sprint_result("</16>Note:<!16> Commands are case sensitive.");
 }
 /**
  * @brief Display the configuration that has been parsed from the configuration
@@ -385,7 +388,7 @@ void print_help(){
 static void print_loaded_configs() {
 	struct process_config_t *pclist_iter = hds_config.process_config_list;
 	clear_result_window();
-	sprint_result("Loaded configs:");
+	sprint_result("Loaded from configuration file:");
 	vprint_result("\tlog_filename: %s", hds_config.log_filename);
 	sprint_result("Max. resource available:");
 	vprint_result("\t memory(MB): %d printer(units): %d scanner(units): %d",

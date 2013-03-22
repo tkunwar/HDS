@@ -47,11 +47,13 @@ int main(int argc, char *argv[]) {
 	if (hds_ui_main() != HDS_OK) {
 		exit(EXIT_FAILURE);
 	}
+	sdebug("HOST Shell: Intialized UI");
 	//now start main worker threads
 //	if (start_main_worker_threads() != HDS_OK) {
 //		exit(EXIT_FAILURE);
 //	}
 	//now wait for user input and process key-presses
+	sdebug("Waiting for user command");
 	process_user_response();
 	exit(EXIT_SUCCESS);
 }

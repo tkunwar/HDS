@@ -208,14 +208,5 @@ static void signal_handler(int sig) {
 //	}
 //	return ACP_OK;
 //}
-void execute_commands(const char *command){
-	if ( (strcmp(command,"help") ==0) || (strcmp(command,"HELP") ==0) ){
-		print_help();
-	}
-}
-void print_help(){
-	sprint_result("\t\tHelp Options for HOST Shell");
-	int num = 5;
-	vprint_result("num is %d",num);
-}
+
 

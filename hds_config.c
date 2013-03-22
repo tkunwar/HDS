@@ -22,28 +22,24 @@ static void init_hds_config() {
 	hds_config.max_resources.printer = 0;
 	hds_config.max_resources.scanner = 0;
 }
-/**
- * @brief Display the configuration that has been parsed from the configuration
- * file.
- */
-static void print_loaded_configs() {
-	struct process_config_t *pclist_iter = hds_config.process_config_list;
-
-	fprintf(stderr, "\nLoaded configs:");
-	fprintf(stderr, "\n\tlog_filename: %s", hds_config.log_filename);
-	fprintf(stderr,
-			"\nMax. resource available:\n\t memory(MB): %d printer(units): %d scanner(units): %d",
-			hds_config.max_resources.memory, hds_config.max_resources.printer,
-			hds_config.max_resources.scanner);
-	fprintf(stderr, "\nLoaded process config list:");
-	for (; pclist_iter != NULL ; pclist_iter = pclist_iter->next) {
-		fprintf(stderr,
-				"\n\tloaded: pid: %u type: %d memory_req: %d printer_req: %d scanner_req: %d",
-				pclist_iter->pid, pclist_iter->type, pclist_iter->memory_req,
-				pclist_iter->printer_req, pclist_iter->scanner_req);
-	}
-	fprintf(stderr, "\n");
-}
+//static void print_loaded_configs() {
+//	struct process_config_t *pclist_iter = hds_config.process_config_list;
+//
+//	fprintf(stderr, "\nLoaded configs:");
+//	fprintf(stderr, "\n\tlog_filename: %s", hds_config.log_filename);
+//	fprintf(stderr,
+//			"\nMax. resource available:\n\t memory(MB): %d printer(units): %d scanner(units): %d",
+//			hds_config.max_resources.memory, hds_config.max_resources.printer,
+//			hds_config.max_resources.scanner);
+//	fprintf(stderr, "\nLoaded process config list:");
+//	for (; pclist_iter != NULL ; pclist_iter = pclist_iter->next) {
+//		fprintf(stderr,
+//				"\n\tloaded: pid: %u type: %d memory_req: %d printer_req: %d scanner_req: %d",
+//				pclist_iter->pid, pclist_iter->type, pclist_iter->memory_req,
+//				pclist_iter->printer_req, pclist_iter->scanner_req);
+//	}
+//	fprintf(stderr, "\n");
+//}
 /**
  * @brief Adds a new entry in process_config_list.
  * @param node

@@ -194,4 +194,8 @@ void display_help();
 long int gettime_in_nsecs();
 int open_log_file();
 void write_to_result_window(const char* msg,int num_rows);
+void print_help();
+void execute_commands(const char *command);
+
+
 #endif

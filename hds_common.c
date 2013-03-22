@@ -11,6 +11,7 @@ static void init_window_pointers();
 static void init_cdks_pointers();
 static void destroy_hds_window(); //main routine for deleting windows
 static void redraw_cdkscreens(); //draw cdkscrens after drawing a popup window or
+static void print_loaded_configs() ;
 //===========================================
 /**
  * @brief Destroy cdk screen pointers that are present in hds_state.
@@ -349,4 +350,52 @@ void write_to_result_window(const char* msg,int num_rows){
 	 * addCDKSWindow,cleanCDKSWindow and trimCDKSWindow should manage cdkswindows.
 	 */
 	addCDKSwindow(hds_state.output_screen, msg, BOTTOM);
+}
+void execute_commands(const char *command){
+	if ( (strcmp(command,"help") ==0) || (strcmp(command,"HELP") ==0) ){
+		print_help();
+	}
+	else if ((strcmp(command,"print_config") == 0)){
+		print_loaded_configs();
+	}
+}
+void clear_result_window(){
+	cleanCDKSwindow(hds_state.output_screen);
+}
+void print_help(){
+	clear_result_window();
+	sprint_result("<C>tHelp Options for HOST Shell");
+	sprint_result("<C>---------------------------------------");
+	sprint_result("\tKeyboard shortcuts:");
+	sprint_result("\t\t F4 - Exit HOST");
+	sprint_result("\t\t PAGE_UP - Focus Result window");
+	sprint_result("\t\t PAGE_DOWN - Focus Cosnole window");
+	sprint_result("\t\t Press <ENTER> to mark one command.");
+	sprint_result(" ");
+	sprint_result("Following lists supported commands.");
+	sprint_result("\t\t</32>Command<!32>\t\t\t </24>Action<!24>");
+	sprint_result("\t\tprint_config\t Shows the list of processes loaded from config file.");
+	sprint_result(" ");
+	sprint_result("</16>Note:<!16> commands are case sensitive.");
+}
+/**
+ * @brief Display the configuration that has been parsed from the configuration
+ * file.
+ */
+static void print_loaded_configs() {
+	struct process_config_t *pclist_iter = hds_config.process_config_list;
+	clear_result_window();
+	sprint_result("Loaded configs:");
+	vprint_result("\tlog_filename: %s", hds_config.log_filename);
+	sprint_result("Max. resource available:");
+	vprint_result("\t memory(MB): %d printer(units): %d scanner(units): %d",
+			hds_config.max_resources.memory, hds_config.max_resources.printer,
+			hds_config.max_resources.scanner);
+	sprint_result("Loaded process config list:");
+	for (; pclist_iter != NULL ; pclist_iter = pclist_iter->next) {
+		vprint_result("\tloaded: pid: %u type: %d memory_req: %d printer_req: %d scanner_req: %d",
+				pclist_iter->pid, pclist_iter->type, pclist_iter->memory_req,
+				pclist_iter->printer_req, pclist_iter->scanner_req);
+	}
+	sprint_result(" ");
 }

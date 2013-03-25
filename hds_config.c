@@ -14,41 +14,23 @@ static void print_loaded_configs();
  */
 static void init_hds_config() {
 	strcpy(hds_config.log_filename, "hds_output.log");
-	hds_config.process_config_list = NULL;
-	hds_config.process_config_last_element = NULL;
+	hds_config.job_dispatch_list = NULL;
+	hds_config.job_dispatch_list_last_ele = NULL;
 	hds_config.process_id_counter = 0;
 
 	hds_config.max_resources.memory = 0;
 	hds_config.max_resources.printer = 0;
 	hds_config.max_resources.scanner = 0;
 }
-//static void print_loaded_configs() {
-//	struct process_config_t *pclist_iter = hds_config.process_config_list;
-//
-//	fprintf(stderr, "\nLoaded configs:");
-//	fprintf(stderr, "\n\tlog_filename: %s", hds_config.log_filename);
-//	fprintf(stderr,
-//			"\nMax. resource available:\n\t memory(MB): %d printer(units): %d scanner(units): %d",
-//			hds_config.max_resources.memory, hds_config.max_resources.printer,
-//			hds_config.max_resources.scanner);
-//	fprintf(stderr, "\nLoaded process config list:");
-//	for (; pclist_iter != NULL ; pclist_iter = pclist_iter->next) {
-//		fprintf(stderr,
-//				"\n\tloaded: pid: %u type: %d memory_req: %d printer_req: %d scanner_req: %d",
-//				pclist_iter->pid, pclist_iter->type, pclist_iter->memory_req,
-//				pclist_iter->printer_req, pclist_iter->scanner_req);
-//	}
-//	fprintf(stderr, "\n");
-//}
 /**
  * @brief Adds a new entry in process_config_list.
  * @param node
  */
-int add_new_process_config(struct process_config_t node) {
-	struct process_config_t *tmp_node = NULL;
+int add_new_process_config(struct hds_process_t node) {
+	struct hds_process_t *tmp_node = NULL;
 	//allocate memory to it
-	tmp_node = (struct process_config_t *) malloc(
-			sizeof(struct process_config_t));
+	tmp_node = (struct hds_process_t *) malloc(
+			sizeof(struct hds_process_t));
 	if (!tmp_node) {
 		fprintf(stderr,
 				"malloc failed while adding new process_config item to process_config_list");
@@ -56,27 +38,28 @@ int add_new_process_config(struct process_config_t node) {
 	}
 	tmp_node->next = NULL;
 	//assign values to tmp_node
-	tmp_node->type = node.type;
+	tmp_node->priority = node.priority;
 	tmp_node->memory_req = node.memory_req;
 	tmp_node->scanner_req = node.scanner_req;
 	tmp_node->printer_req = node.printer_req;
-//	hds_config.process_id_counter = hds_config.process_id_counter +1;
+	tmp_node -> cpu_req = node.cpu_req;
+
 	tmp_node->pid = (++hds_config.process_id_counter);
 
-	if (hds_config.process_config_list == NULL ) {
+	if (hds_config.job_dispatch_list == NULL ) {
 		// this is first time
-		hds_config.process_config_list = tmp_node;
-		hds_config.process_config_last_element = tmp_node;
+		hds_config.job_dispatch_list = tmp_node;
+		hds_config.job_dispatch_list_last_ele = tmp_node;
 	} else {
 		//add tmp_node to end of list
-		hds_config.process_config_last_element->next = tmp_node;
-		hds_config.process_config_last_element = tmp_node;
+		hds_config.job_dispatch_list_last_ele->next = tmp_node;
+		hds_config.job_dispatch_list_last_ele = tmp_node;
 	}
 	return HDS_OK;
 }
-void cleanup_process_config_list() {
-	struct process_config_t *cur_node = hds_config.process_config_list;
-	struct process_config_t *next_node = NULL;
+void cleanup_process_dispatch_list() {
+	struct hds_process_t *cur_node = hds_config.job_dispatch_list;
+	struct hds_process_t *next_node = NULL;
 	do {
 		next_node = cur_node->next;
 		free(cur_node);
@@ -95,7 +78,7 @@ int load_config() {
 	const char* s_val = NULL; // will be used to store string values
 	config_setting_t *setting;
 	config_setting_t *max_res_setting;
-	struct process_config_t tmp_config;
+	struct hds_process_t tmp_config;
 	tmp_config.next = NULL;
 
 	// initialize hds_config state
@@ -147,14 +130,16 @@ int load_config() {
 					config_setting_get_elem(setting, i);
 
 			/* Only output the record if all of the expected fields are present. */
-			if (!(config_setting_lookup_int(process_config_from_file, "type",
-					&tmp_config.type)
+			if (!(config_setting_lookup_int(process_config_from_file, "priority",
+					&tmp_config.priority)
 					&& config_setting_lookup_int(process_config_from_file,
 							"memory_req", &tmp_config.memory_req)
 					&& config_setting_lookup_int(process_config_from_file,
 							"printer_req", &tmp_config.printer_req)
 					&& config_setting_lookup_int(process_config_from_file,
-							"scanner_req", &tmp_config.scanner_req)))
+							"scanner_req", &tmp_config.scanner_req)
+					&& config_setting_lookup_int(process_config_from_file,
+							"cpu_req", &tmp_config.cpu_req)))
 				continue;
 
 			//add this to process_config_list
@@ -165,8 +150,5 @@ int load_config() {
 		}
 	}
 	config_destroy(&cfg);
-//	print_loaded_configs();
-//	cleanup_process_config_list();
-
 	return HDS_OK;
 }

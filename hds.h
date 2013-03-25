@@ -11,5 +11,6 @@
 
 #include "hds_common.h"
 #include "hds_ui.h"
+#include "hds_core.h"
 
 #endif

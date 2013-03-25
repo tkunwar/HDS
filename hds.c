@@ -49,9 +49,9 @@ int main(int argc, char *argv[]) {
 	}
 	sdebug("HOST Shell: Intialized UI");
 	//now start main worker threads
-//	if (start_main_worker_threads() != HDS_OK) {
-//		exit(EXIT_FAILURE);
-//	}
+	if (start_main_worker_threads() != HDS_OK) {
+		exit(EXIT_FAILURE);
+	}
 	//now wait for user input and process key-presses
 	sdebug("Waiting for user command");
 	process_user_response();
@@ -95,7 +95,7 @@ void process_user_response() {
 		default:
 			// if anything other than F4 was pressed inject it
 			// to entry widget.
-			injectCDKEntry(hds_state.read_input,ch);
+			injectCDKEntry(hds_state.read_input, ch);
 			//read anything from user
 			info = activateCDKEntry(hds_state.read_input, 0);
 			if (hds_state.read_input->exitType == vESCAPE_HIT) {
@@ -120,9 +120,10 @@ void hds_shutdown() {
 	//other stuff related to cleanup but it's a normal cleanup
 	//signal that we are shutting down
 	hds_state.shutdown_in_progress = true;
-//	var_debug("Parent sleeping for %d seconds to let child threads finish.",PARENT_WAIT_FOR_CHILD_THREADS);
+	var_debug("Parent sleeping for %d seconds to let child threads finish.",PARENT_WAIT_FOR_CHILD_THREADS);
 	//wait for child threads
-//	sleep(PARENT_WAIT_FOR_CHILD_THREADS);
+	sleep(PARENT_WAIT_FOR_CHILD_THREADS);
+
 	//shut down GUI
 	if (hds_state.gui_ready == TRUE) {
 		close_ui();
@@ -132,20 +133,21 @@ void hds_shutdown() {
 		endCDK();
 	}
 	//collect master threads
-//	if (pthread_join(hds_state.gmm_main_thread, NULL ) != 0) {
-//		fprintf(stderr, "\nError in collecting thread: gmm_main");
-//		exit(EXIT_FAILURE);
-//	}
-//	if (pthread_join(hds_state.cmm_main_thread,NULL)!=0){
-//			fprintf(stderr,"\nError in collecting thread: cmm_main");
-//			exit(EXIT_FAILURE);
-//	}
-	//cleanup process config list
-	cleanup_process_config_list();
+	if (pthread_join(hds_state.hds_dispatcher, NULL ) != 0) {
+		fprintf(stderr, "\nError in collecting thread: hds_dispatcher");
+		exit(EXIT_FAILURE);
+	}
+	if (pthread_join(hds_state.hds_scheduler, NULL ) != 0) {
+		fprintf(stderr, "\nError in collecting thread: hds_dispatcher");
+		exit(EXIT_FAILURE);
+	}
+	if (pthread_join(hds_state.hds_cpu, NULL ) != 0) {
+		fprintf(stderr, "\nError in collecting thread: hds_cpu");
+		exit(EXIT_FAILURE);
+	}
 
 	fclose(hds_state.log_ptr);
 	sigemptyset(&sigact.sa_mask);
-//	exit(EXIT_SUCCESS);
 	ExitProgram(EXIT_SUCCESS);
 }
 /**
@@ -187,28 +189,30 @@ void init_signals(void) {
 static void signal_handler(int sig) {
 	//set the signal code that we got
 	hds_state.recieved_signal_code = sig;
-	// Attempt to perform cleanup_after_failure when we have SIGINT,SIGKILL and SIGQUIT
-	// else give up
-//	if ((sig == SIGINT) || (sig == SIGQUIT) || (sig == SIGKILL)) {
 	sdebug("Prepairing to exit gracefully..");
 	hds_state.shutdown_in_progress = true;
-	//wait while cleanup_after_failure is finished
-	//a mutex lock would have been more efficient
-//		while(hds_state.shutdown_completed==false){
-//			sleep(1);
-//		}
-//	}
-//	exit(EXIT_FAILURE);
 	hds_shutdown();
 }
-//int start_main_worker_threads() {
-//	//create main hds_gmm thread
-//	if (pthread_create(&hds_state.gmm_main_thread, NULL, hds_gmm_main, NULL )
-//			!= 0) {
-//		serror("\nThread1 creation failed ");
-//		return ACP_ERR_THREAD_INIT;
-//	}
-//	return ACP_OK;
-//}
-
+int start_main_worker_threads() {
+	//first init the hds_core state
+	init_hds_core_state();
+	//create main hds_dispatcher thread
+	if (pthread_create(&hds_state.hds_dispatcher, NULL, hds_dispatcher, NULL )
+			!= 0) {
+		serror("\nFailed to create dispatcher thread");
+		return HDS_ERR_THREAD_INIT;
+	}
+	//create scheduler thread
+	if (pthread_create(&hds_state.hds_scheduler, NULL, hds_dispatcher, NULL )
+			!= 0) {
+		serror("\nFailed to create scheduler thread");
+		return HDS_ERR_THREAD_INIT;
+	}
+	//create cpu_thread
+	if (pthread_create(&hds_state.hds_cpu, NULL, hds_dispatcher, NULL ) != 0) {
+		serror("\nFailed to create cpu thread");
+		return HDS_ERR_THREAD_INIT;
+	}
+	return HDS_OK;
+}
 

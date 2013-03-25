@@ -86,13 +86,14 @@
  * @struct hds_config_t
  * @brief Structure for storing information loaded from configuration file.
  */
-struct process_config_t{
+struct hds_process_t{
 	int pid; // will be populated later on
-	process_type_t type;
+	int priority;
+	int cpu_req;
 	int memory_req;
 	int printer_req;
 	int scanner_req;
-	struct process_config_t *next;
+	struct hds_process_t *next;
 };
 
 struct max_resources_t{
@@ -101,8 +102,8 @@ struct max_resources_t{
 	int scanner;
 };
 struct hds_config_t {
-	struct process_config_t *process_config_list; //list of processes loaded from config file.
-	struct process_config_t *process_config_last_element;
+	struct hds_process_t *job_dispatch_list; //list of processes loaded from config file.
+	struct hds_process_t *job_dispatch_list_last_ele;
 	struct max_resources_t max_resources;
 	char log_filename[200];
 	unsigned int process_id_counter;
@@ -110,6 +111,6 @@ struct hds_config_t {
 
 // --------routines-----------
 int load_config();
-void cleanup_process_config_list();
+void cleanup_process_dispatch_list();
 #endif
 

@@ -96,6 +96,11 @@ struct HDS_STATE {
 	bool shutdown_completed;
 	int recieved_signal_code;
 	FILE *log_ptr;
+
+	pthread_t hds_dispatcher;
+	pthread_t hds_scheduler;
+	pthread_t hds_cpu;
+
 } hds_state;
 
 #define sprint_result(s) snprintf(hds_state.result_msg, LOG_BUFF_SIZE,s );\

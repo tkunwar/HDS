@@ -13,7 +13,7 @@ CFLAGS=-Wall -g -lcdk -lncurses -lpthread -lrt
 LIBS=libconfig.a
 
 all:hds
-hds: hds.o hds_ui.o hds_common.o hds_config.o
+hds: hds.o hds_ui.o hds_common.o hds_config.o hds_core.o
 	$(CC) -o $@ $^ $(LIBS) $(CFLAGS)
 
 %.o: %.c

@@ -18,9 +18,5 @@ typedef enum{
 	on /**< Signifies that value is set */
 } ON_OFF;
 
-typedef enum{
-	USER_PROCESS,
-	RT_PROCESS
-}process_type_t;
 
 #endif /* HDS_DTYPES_H_ */

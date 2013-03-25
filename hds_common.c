@@ -355,7 +355,7 @@ void execute_commands(const char *command){
 	if ( (strcmp(command,"help") ==0) || (strcmp(command,"HELP") ==0) ){
 		print_help();
 	}
-	else if ((strcmp(command,"print_config") == 0)){
+	else if ((strcmp(command,"print_dl") == 0)){
 		print_loaded_configs();
 	}else{
 		clear_result_window();
@@ -377,7 +377,7 @@ void print_help(){
 	sprint_result(" ");
 	sprint_result("Following lists supported commands.");
 	sprint_result("\t\t</32>Command<!32>\t\t\t </24>Action<!24>");
-	sprint_result("\t\tprint_config\t Shows the list of processes loaded from config file.");
+	sprint_result("\t\tprint_dl\t Shows the job dispatch list of processes loaded from config file.");
 	sprint_result(" ");
 	sprint_result("</16>Note:<!16> Commands are case sensitive.");
 }
@@ -386,7 +386,7 @@ void print_help(){
  * file.
  */
 static void print_loaded_configs() {
-	struct process_config_t *pclist_iter = hds_config.process_config_list;
+	struct hds_process_t *pclist_iter = hds_config.job_dispatch_list;
 	clear_result_window();
 	sprint_result("Loaded from configuration file:");
 	vprint_result("\tlog_filename: %s", hds_config.log_filename);
@@ -394,10 +394,10 @@ static void print_loaded_configs() {
 	vprint_result("\t memory(MB): %d printer(units): %d scanner(units): %d",
 			hds_config.max_resources.memory, hds_config.max_resources.printer,
 			hds_config.max_resources.scanner);
-	sprint_result("Loaded process config list:");
+	sprint_result("Loaded process dispatch list:");
 	for (; pclist_iter != NULL ; pclist_iter = pclist_iter->next) {
-		vprint_result("\tloaded: pid: %u type: %d memory_req: %d printer_req: %d scanner_req: %d",
-				pclist_iter->pid, pclist_iter->type, pclist_iter->memory_req,
+		vprint_result("\tloaded: pid: %u priority: %d cpu_req: %d memory_req: %d printer_req: %d scanner_req: %d",
+				pclist_iter->pid, pclist_iter->priority,pclist_iter->cpu_req, pclist_iter->memory_req,
 				pclist_iter->printer_req, pclist_iter->scanner_req);
 	}
 	sprint_result(" ");

@@ -345,6 +345,9 @@ void gettime_in_mseconds() {
 
 	printf("Elapsed time: %ld milliseconds\n", mtime);
 }
+unsigned int gettime_in_seconds(){
+
+}
 void write_to_result_window(const char* msg,int num_rows){
 	/*
 	 * addCDKSWindow,cleanCDKSWindow and trimCDKSWindow should manage cdkswindows.

@@ -106,7 +106,6 @@ struct hds_config_t {
 	struct hds_process_t *job_dispatch_list_last_ele;
 	struct max_resources_t max_resources;
 	char log_filename[200];
-	unsigned int process_id_counter;
 } hds_config;
 
 // --------routines-----------

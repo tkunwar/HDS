@@ -16,7 +16,6 @@ static void init_hds_config() {
 	strcpy(hds_config.log_filename, "hds_output.log");
 	hds_config.job_dispatch_list = NULL;
 	hds_config.job_dispatch_list_last_ele = NULL;
-	hds_config.process_id_counter = 0;
 
 	hds_config.max_resources.memory = 0;
 	hds_config.max_resources.printer = 0;
@@ -44,7 +43,7 @@ int add_new_process_config(struct hds_process_t node) {
 	tmp_node->printer_req = node.printer_req;
 	tmp_node -> cpu_req = node.cpu_req;
 
-	tmp_node->pid = (++hds_config.process_id_counter);
+	tmp_node->pid = 0;
 
 	if (hds_config.job_dispatch_list == NULL ) {
 		// this is first time
@@ -59,6 +58,9 @@ int add_new_process_config(struct hds_process_t node) {
 }
 void cleanup_process_dispatch_list() {
 	struct hds_process_t *cur_node = hds_config.job_dispatch_list;
+	if (!cur_node){
+		return;
+	}
 	struct hds_process_t *next_node = NULL;
 	do {
 		next_node = cur_node->next;

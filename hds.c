@@ -194,8 +194,12 @@ static void signal_handler(int sig) {
 	hds_shutdown();
 }
 int start_main_worker_threads() {
+	//init the hds_resource state
+	init_hds_resource_state();
+
 	//first init the hds_core state
 	init_hds_core_state();
+
 	//create main hds_dispatcher thread
 	if (pthread_create(&hds_state.hds_dispatcher, NULL, hds_dispatcher, NULL )
 			!= 0) {

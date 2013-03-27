@@ -93,6 +93,9 @@ void process_user_response() {
 		case KEY_F(12):
 			break;
 		default:
+//			if (hds_state.shutdown_in_progress){
+//				hds_shutdown();
+//			}
 			// if anything other than F4 was pressed inject it
 			// to entry widget.
 			injectCDKEntry(hds_state.read_input, ch);
@@ -119,10 +122,14 @@ void process_user_response() {
 void hds_shutdown() {
 	//other stuff related to cleanup but it's a normal cleanup
 	//signal that we are shutting down
-	hds_state.shutdown_in_progress = true;
-	var_debug("Parent sleeping for %d seconds to let child threads finish.",PARENT_WAIT_FOR_CHILD_THREADS);
+	if (hds_state.parent_pid != getpid()){
+		//simply exit we are a child process
+		exit(EXIT_SUCCESS);
+	}
+//	hds_state.shutdown_in_progress = true;
+//	var_debug("Parent sleeping for %d seconds to let child threads finish.",PARENT_WAIT_FOR_CHILD_THREADS);
 	//wait for child threads
-	sleep(PARENT_WAIT_FOR_CHILD_THREADS);
+//	sleep(PARENT_WAIT_FOR_CHILD_THREADS);
 
 	//shut down GUI
 	if (hds_state.gui_ready == TRUE) {
@@ -138,7 +145,7 @@ void hds_shutdown() {
 		exit(EXIT_FAILURE);
 	}
 	if (pthread_join(hds_state.hds_scheduler, NULL ) != 0) {
-		fprintf(stderr, "\nError in collecting thread: hds_dispatcher");
+		fprintf(stderr, "\nError in collecting thread: hds_scheduler");
 		exit(EXIT_FAILURE);
 	}
 	if (pthread_join(hds_state.hds_cpu, NULL ) != 0) {
@@ -174,8 +181,6 @@ void init_signals(void) {
 	sigaddset(&sigact.sa_mask, SIGHUP);
 	sigaction(SIGHUP, &sigact, (struct sigaction *) NULL );
 
-	sigaddset(&sigact.sa_mask, SIGKILL);
-	sigaction(SIGKILL, &sigact, (struct sigaction *) NULL );
 }
 /**
  * @brief Signal handler routine.
@@ -189,7 +194,7 @@ void init_signals(void) {
 static void signal_handler(int sig) {
 	//set the signal code that we got
 	hds_state.recieved_signal_code = sig;
-	sdebug("Prepairing to exit gracefully..");
+//	sdebug("Prepairing to exit gracefully..");
 	hds_state.shutdown_in_progress = true;
 	hds_shutdown();
 }
@@ -207,13 +212,13 @@ int start_main_worker_threads() {
 		return HDS_ERR_THREAD_INIT;
 	}
 	//create scheduler thread
-	if (pthread_create(&hds_state.hds_scheduler, NULL, hds_dispatcher, NULL )
+	if (pthread_create(&hds_state.hds_scheduler, NULL, hds_scheduler, NULL )
 			!= 0) {
 		serror("\nFailed to create scheduler thread");
 		return HDS_ERR_THREAD_INIT;
 	}
 	//create cpu_thread
-	if (pthread_create(&hds_state.hds_cpu, NULL, hds_dispatcher, NULL ) != 0) {
+	if (pthread_create(&hds_state.hds_cpu, NULL, hds_cpu, NULL ) != 0) {
 		serror("\nFailed to create cpu thread");
 		return HDS_ERR_THREAD_INIT;
 	}

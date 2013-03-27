@@ -18,11 +18,11 @@ struct hds_resource_state_t{
 struct process_queue_t{
 	unsigned long int arrival_time;
 	int priority;
-	int cpu_time;
+	int cpu_req;
 	int memory_req;
 	int printer_req;
 	int scanner_req;
-	unsigned int pid; /**< A non zero pid would mean it has not yet run for once. Once a process runs
+	int pid; /**< A non zero pid would mean it has not yet run for once. Once a process runs
 	 	 	 	 	 	 it will have a valid pid. It could be in either suspended/running state.*/
 	struct process_queue_t *next;
 };
@@ -47,6 +47,8 @@ struct hds_core_state_t{
 	struct process_queue_t active_process;
 	pthread_mutex_t next_to_run_process_lock;
 	struct process_queue_t next_to_run_process;
+	bool active_process_valid;
+	bool next_to_run_process_valid;
 }hds_core_state;
 
 void init_hds_core_state();

@@ -6,6 +6,13 @@ static int remove_first_ele_from_dispatcher_q(
 static int insert_process_to_q(struct process_queue_t **qhead,
 		struct process_queue_t **q_last,
 		struct hds_process_t *process_frm_dispatch_list);
+static bool can_process_be_admitted(struct process_queue_t *next_to_run);
+static struct process_queue_t *find_next_process_tobe_executed();
+static void remove_process_from_queue(struct process_queue_t *p);
+static void degrade_priority_and_save_to_q(struct process_queue_t *p);
+static void del_node(struct process_queue_t *qhead,
+		struct process_queue_t *to_be_deleted);
+static void child_function();
 
 void init_hds_resource_state() {
 	hds_resource_state.avail_memory = hds_config.max_resources.memory;
@@ -39,8 +46,13 @@ void init_hds_core_state() {
 			!= 0) {
 		serror("Failed to initialize mutex: avail_resource_mutex");
 	}
-	hds_core_state.active_process.pid = hds_core_state.next_to_run_process.pid =
-			0;
+//	hds_core_state.active_process.pid = hds_core_state.next_to_run_process.pid =
+//			-1; //to check if next_to_run process has been seen by cpu
+//	hds_core_state.active_process.priority =
+//			hds_core_state.next_to_run_process.priority = -1; //to check if it's the first
+//															  //time we are running
+	hds_core_state.active_process_valid =
+			hds_core_state.next_to_run_process_valid = false;
 }
 /**
  * @brief Main routine for dispatcher thread
@@ -88,6 +100,16 @@ void *hds_dispatcher(void *args) {
 				break;
 			}
 			pthread_mutex_unlock(&hds_core_state.rtq_mutex);
+			var_debug(
+					"dispatcher: Adding process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d) to rtq",
+					hds_config.job_dispatch_list->pid,
+					hds_config.job_dispatch_list->priority,
+					hds_config.job_dispatch_list->cpu_req,
+					hds_config.job_dispatch_list->memory_req,
+					hds_config.job_dispatch_list->printer_req,
+					hds_config.job_dispatch_list->scanner_req)
+			;
+
 			//remove this process from dispatch queue
 			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
 			break;
@@ -102,6 +124,15 @@ void *hds_dispatcher(void *args) {
 				break;
 			}
 			pthread_mutex_unlock(&hds_core_state.p1q_mutex);
+			var_debug(
+					"dispatcher: Adding process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d) to p1q",
+					hds_config.job_dispatch_list->pid,
+					hds_config.job_dispatch_list->priority,
+					hds_config.job_dispatch_list->cpu_req,
+					hds_config.job_dispatch_list->memory_req,
+					hds_config.job_dispatch_list->printer_req,
+					hds_config.job_dispatch_list->scanner_req)
+			;
 			//remove this process from dispatch queue
 			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
 			break;
@@ -116,6 +147,15 @@ void *hds_dispatcher(void *args) {
 				break;
 			}
 			pthread_mutex_unlock(&hds_core_state.p2q_mutex);
+			var_debug(
+					"dispatcher: Adding process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d) to p2q",
+					hds_config.job_dispatch_list->pid,
+					hds_config.job_dispatch_list->priority,
+					hds_config.job_dispatch_list->cpu_req,
+					hds_config.job_dispatch_list->memory_req,
+					hds_config.job_dispatch_list->printer_req,
+					hds_config.job_dispatch_list->scanner_req)
+			;
 			//remove this process from dispatch queue
 			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
 			break;
@@ -130,7 +170,23 @@ void *hds_dispatcher(void *args) {
 				break;
 			}
 			pthread_mutex_unlock(&hds_core_state.p3q_mutex);
+			var_debug(
+					"dispatcher: Adding process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d) to p3q",
+					hds_config.job_dispatch_list->pid,
+					hds_config.job_dispatch_list->priority,
+					hds_config.job_dispatch_list->cpu_req,
+					hds_config.job_dispatch_list->memory_req,
+					hds_config.job_dispatch_list->printer_req,
+					hds_config.job_dispatch_list->scanner_req)
+			;
 			//remove this process from dispatch queue
+			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
+			break;
+		default:
+			//this is a process having unrecognized priority. we remove it
+			serror(
+					"Found a process with bogus priority. Removing from the list")
+			;
 			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
 			break;
 		}
@@ -156,14 +212,291 @@ void *hds_scheduler(void *args) {
 	 * 3. Insert this process in hds_core_state.next_to_run_process.
 	 * 4. Remove this process from its current queue.
 	 */
+	struct process_queue_t *next_process = NULL, *tmp = NULL;
 	while (1) {
 		if (hds_state.shutdown_in_progress == true) {
 			break;
 		}
+//		var_debug("scheduler: parent: %d, I belong to %d process",hds_state.parent_pid,getpid());
+		//find next highest process which has passed the admission test.
+		next_process = find_next_process_tobe_executed();
 
+		if (next_process == NULL ) {
+			//no process could pass the admission test possibly because, resources
+			// are held by older processes have not yet been released
+			sdebug(
+					"Could not find a process to be scheduled for next execution.");
+			sleep(1);
+			continue;
+		}
+		var_debug(
+				"scheduler: Selected next process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
+				next_process->pid, next_process->priority,
+				next_process->cpu_req, next_process->memory_req,
+				next_process->printer_req, next_process->scanner_req);
+
+		// now we have a process which will be scheduled for execution in the
+		// next cycle. However we will schedule it only when it has higher
+		// priority than the currently executing process. If not then we will wait
+		// until execution of active process it over. However, while we are waiting
+		// a new process of higher priority might arrive from dispatch queue
+		// therefore better would be that we continue up.
+
+		//for the first time, since active_process and next_to_run process both
+		// have their priorities set to -1. to avoid this check for first time
+		// we will check if active_process's is valid
+		if ((hds_core_state.active_process.priority < next_process->priority)
+				&& (hds_core_state.active_process_valid == true)) {
+			sdebug("Active process cant be interrupted !");
+			sleep(1);
+			continue;
+		}
+
+		// here we have a process which is at higher priority than the currently
+		// executing process. Now we should save it in hds_core_state.next_to_run
+		// process such that in the next cycle cpu thread will find it and execute it.
+		// However what if next_to_run process has not yet run ? CPU might not have
+		// seen it as of now.
+		// To handle such case, we check if next_to_run process is a high priority
+		// process as compared to the next_process. If it's so then we will not
+		// interrupt it rather we will sleep and continue all the way up.
+		// however if it's at lower priority then we will replace it by
+		// next_process attributes and insert the next_to_run process into
+		// its queue *without* lowering the priority.
+		/*
+		 * how do we know that next_to_run process has been seen and serviced
+		 * by cpu_thread. If cpu has seen and started the next_to_run process,
+		 * then it will reset the next_to_run process->pid to -1. Note that
+		 * by default all pids are 0 unless they have been started, in that case
+		 * pid will be a valid linux PID.
+		 */
+
+		if (hds_core_state.next_to_run_process_valid == false) {
+			//it will be replaced for sure. this handles the initial case
+			var_debug(
+					"scheduler: Setting next to be executed process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
+					next_process->pid, next_process->priority,
+					next_process->cpu_req, next_process->memory_req,
+					next_process->printer_req, next_process->scanner_req);
+
+			pthread_mutex_lock(&hds_core_state.next_to_run_process_lock);
+			hds_core_state.next_to_run_process.arrival_time =
+					next_process->arrival_time;
+			hds_core_state.next_to_run_process.cpu_req = next_process->cpu_req;
+			hds_core_state.next_to_run_process.memory_req =
+					next_process->memory_req;
+			hds_core_state.next_to_run_process.pid = next_process->pid;
+			hds_core_state.next_to_run_process.printer_req =
+					next_process->printer_req;
+			hds_core_state.next_to_run_process.priority =
+					next_process->priority;
+			hds_core_state.next_to_run_process.scanner_req =
+					next_process->scanner_req;
+
+			//validate next_to_run process
+			hds_core_state.next_to_run_process_valid = true;
+			pthread_mutex_unlock(&hds_core_state.next_to_run_process_lock);
+			// now that next_process has been submitted to cpu remove it from
+			// its current queue.
+			remove_process_from_queue(next_process);
+			continue;
+		}
+		/*
+		 * if next_to_run process is valid one,then we will check if it can
+		 * be replaced.
+		 */
+		if ((hds_core_state.next_to_run_process.priority
+				< next_process->priority)) {
+			//next_to_run process cant be replaced
+			sdebug("Cant replace next_to_run process");
+			sleep(1);
+			continue;
+		} else {
+			// since next_to_run process is a valid process it means
+			// next_to_run process has not yet been executed even once and its
+			// priority is even less than next_process so we will replace
+			// it by next_process
+
+			// first degrade priority of next_to_run process and save it to
+			// appropriate queues
+			var_debug(
+					"scheduler: Replacing next_to_run process with(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
+					next_process->pid, next_process->priority,
+					next_process->cpu_req, next_process->memory_req,
+					next_process->printer_req, next_process->scanner_req);
+
+			pthread_mutex_lock(&hds_core_state.next_to_run_process_lock);
+			// this process has not been executed even once. should it priority
+			// be degraded
+			degrade_priority_and_save_to_q(&hds_core_state.next_to_run_process);
+			pthread_mutex_unlock(&hds_core_state.next_to_run_process_lock);
+
+			//now copy next_process into next_to_run process
+			pthread_mutex_lock(&hds_core_state.next_to_run_process_lock);
+			hds_core_state.next_to_run_process.arrival_time =
+					next_process->arrival_time;
+			hds_core_state.next_to_run_process.cpu_req = next_process->cpu_req;
+			hds_core_state.next_to_run_process.memory_req =
+					next_process->memory_req;
+			hds_core_state.next_to_run_process.pid = next_process->pid;
+			hds_core_state.next_to_run_process.printer_req =
+					next_process->printer_req;
+			hds_core_state.next_to_run_process.priority =
+					next_process->priority;
+			hds_core_state.next_to_run_process.scanner_req =
+					next_process->scanner_req;
+
+			//validate next_to_run process
+			hds_core_state.next_to_run_process_valid = true;
+			pthread_mutex_unlock(&hds_core_state.next_to_run_process_lock);
+
+			// now that next_process has been submitted to cpu remove it from
+			// its current queue.
+			remove_process_from_queue(next_process);
+		}
+		//sleep for one second before going up
+		sleep(1);
 	}
 	sdebug("scheduler: Shutting down..");
 	pthread_exit(NULL );
+}
+static void degrade_priority_and_save_to_q(struct process_queue_t *p) {
+	struct process_queue_t * newp = NULL;
+	newp = (struct process_queue_t*) malloc(sizeof(struct process_queue_t));
+	if (!newp) {
+		serror("Failed to allocate memory for new process");
+		return;
+	}
+	//copy all attributes from next_to_run process
+	newp->arrival_time = p->arrival_time;
+	newp->cpu_req = p->cpu_req;
+	newp->memory_req = p->memory_req;
+	newp->pid = p->pid;
+	newp->printer_req = p->printer_req;
+	if (p->priority != 3) {
+		newp->priority = p->priority - 1;
+	}
+
+	newp->scanner_req = p->scanner_req;
+
+	//now depending upon the priority of newp insert into a queue
+	switch (newp->priority) {
+	case 0:
+		//it will never be here since a realtime process cant be interrupted anyway
+		break;
+	case 1:
+		// it cant be here as well, since a realtime process in next_to_run process
+		// cant be replaced
+		break;
+	case 2:
+		pthread_mutex_lock(&hds_core_state.p2q_mutex);
+		hds_core_state.p2q_last->next = newp;
+		hds_core_state.p2q_last = newp;
+		hds_core_state.p2q_last->next = NULL;
+		pthread_mutex_unlock(&hds_core_state.p2q_mutex);
+		break;
+	case 3:
+		pthread_mutex_lock(&hds_core_state.p3q_mutex);
+		hds_core_state.p3q_last->next = newp;
+		hds_core_state.p3q_last = newp;
+		hds_core_state.p3q_last->next = NULL;
+		pthread_mutex_unlock(&hds_core_state.p3q_mutex);
+		break;
+	default:
+		break;
+	}
+}
+static void remove_process_from_queue(struct process_queue_t *p) {
+	/*
+	 * depending upon type of p, we will remove it from its corresponding queue.
+	 */
+
+	switch (p->priority) {
+	case 0:
+		pthread_mutex_lock(&hds_core_state.rtq_mutex);
+		del_node(hds_core_state.rtq, p);
+		pthread_mutex_unlock(&hds_core_state.rtq_mutex);
+		break;
+	case 1:
+		sdebug("trying to lock p1q");
+		pthread_mutex_lock(&hds_core_state.p1q_mutex);
+		sdebug("got lock of p1q");
+		del_node(hds_core_state.p1q, p);
+		pthread_mutex_unlock(&hds_core_state.p1q_mutex);
+		break;
+	case 2:
+		pthread_mutex_lock(&hds_core_state.p2q_mutex);
+		del_node(hds_core_state.p2q, p);
+		pthread_mutex_unlock(&hds_core_state.p2q_mutex);
+		break;
+	case 3:
+		pthread_mutex_lock(&hds_core_state.p3q_mutex);
+		del_node(hds_core_state.p3q, p);
+		pthread_mutex_unlock(&hds_core_state.p3q_mutex);
+		break;
+	default:
+		break;
+	}
+	sdebug("remove_pr_from returning");
+}
+static void del_node(struct process_queue_t *qhead,
+		struct process_queue_t *to_be_deleted) {
+	struct process_queue_t *tmp = qhead;
+	if (!qhead) {
+		//thats bad
+		return;
+	}
+
+	//if head is to deleted
+	if (qhead == to_be_deleted) {
+		free(to_be_deleted);
+		qhead = NULL;
+		return;
+	}
+	//find the element before to_be_deleted
+	for (; tmp->next != NULL && tmp->next != to_be_deleted; tmp = tmp->next)
+		;
+	//now tmp points to the one node before to_be_deleted
+	tmp->next = to_be_deleted->next;
+	tmp = to_be_deleted;
+	free(to_be_deleted);
+}
+static struct process_queue_t *find_next_process_tobe_executed() {
+	struct process_queue_t *node = NULL;
+	//search begins from rtq down to p3q
+
+	pthread_mutex_lock(&hds_core_state.rtq_mutex);
+	//for realtime jobs, the process at head of queue will be executed
+	if (hds_core_state.rtq != NULL ) {
+		return (hds_core_state.rtq);
+	}
+	pthread_mutex_unlock(&hds_core_state.rtq_mutex);
+
+	pthread_mutex_lock(&hds_core_state.p1q_mutex);
+	for (node = hds_core_state.p1q; node != NULL ; node = node->next) {
+		if (can_process_be_admitted(node) == true) {
+			return node;
+		}
+	}
+	pthread_mutex_unlock(&hds_core_state.p1q_mutex);
+
+	pthread_mutex_lock(&hds_core_state.p2q_mutex);
+	for (node = hds_core_state.p2q; node != NULL ; node = node->next) {
+		if (can_process_be_admitted(node) == true) {
+			return node;
+		}
+	}
+	pthread_mutex_unlock(&hds_core_state.p2q_mutex);
+
+	pthread_mutex_lock(&hds_core_state.p3q_mutex);
+	for (node = hds_core_state.p3q; node != NULL ; node = node->next) {
+		if (can_process_be_admitted(node) == true) {
+			return node;
+		}
+	}
+	pthread_mutex_unlock(&hds_core_state.p3q_mutex);
+
+	return NULL ;
 }
 /**
  * @brief Check if this process can be admitted to cpu for executing in the next
@@ -175,9 +508,7 @@ void *hds_scheduler(void *args) {
 static bool can_process_be_admitted(struct process_queue_t *next_to_run) {
 	bool can_be_admitted = false;
 	pthread_mutex_lock(&hds_resource_state.avail_resource_mutex);
-	if ((next_to_run->memory_req < hds_resource_state.avail_memory)
-			&& (next_to_run->printer_req < hds_resource_state.avail_printer)
-			&& (next_to_run->scanner_req < hds_resource_state.avail_scanner)){
+	if ((next_to_run->memory_req < hds_resource_state.avail_memory)) {
 		can_be_admitted = true;
 	}
 	pthread_mutex_unlock(&hds_resource_state.avail_resource_mutex);
@@ -216,80 +547,235 @@ void *hds_cpu(void *args) {
 	 * 7. Update stats as necessary.
 	 * 8.
 	 */
+	int status;
 	while (1) {
 		if (hds_state.shutdown_in_progress == true) {
 			break;
 		}
+		var_debug("cpu: parent: %d, I belong to %d process",hds_state.parent_pid,getpid());
 		/*
-		 * pid_t child_pid;¬
-       17     //flush stdout and stderr so that child does not inherit them¬
-       16     fflush(stdout);¬
-       15     fflush(stderr);¬
-       14 ¬
-       13     child_pid = fork();¬
-       12     switch(child_pid){¬
-       11     case -1:¬
-       10         printf("fork(): failed");¬
-        9         break;¬
-        8     case 0:¬
-        7         child_function();¬
-        6         break;¬
-        5     default:¬
-        4         parent_function(child_pid);¬
-        3         break;¬
-        2     }¬
+		 * if next_to_run process's priority is invalid (-1) then it means that
+		 * scheduler has not submitted any job to us.
+		 * what if next_to_run process is invalid simply because scheduler did
+		 * not give us any process but current process can be executed. ?
 		 */
+		if ((hds_core_state.next_to_run_process_valid == false)
+				&& (hds_core_state.active_process_valid == false)) {
+			swarn("cpu: No valid process in next_to_run process.");
+			sleep(1);
+			continue;
+		}
 		/*
-		 * void parent_function(pid_t child_pid){¬
-       10     int sleep_count = 0,status;¬
-       11     printf("Interrupting child after every one second ");¬
-       12     fflush(stdout);¬
-       13     sleep(1);¬
-       14     while(1){¬
-       15         if (sleep_count == 10){¬
-       16             break;¬
-       17         }¬
-       18         printf("\nStopping child");¬
-       19 fflush(stdout);¬
-       20 ¬
-       21         kill(child_pid,SIGSTOP);¬
-       22         sleep(1);¬
-       23         printf("\nResuming child");¬
-       24 fflush(stdout);¬
-       25 ¬
-       26         kill(child_pid,SIGCONT);¬
-       27 ¬
-       28         sleep(1);¬
-       29         sleep_count++;¬
-       30     }¬
-       31     printf("Now killing child ..");¬
-       32 fflush(stdout);¬
-       33 ¬
-       34     kill(child_pid,SIGKILL);¬
-       35     waitpid(child_pid,&status,WNOHANG);¬
-       36 ¬
-       37     //check and verify how the child exited¬
-       38     //¬
-       39     if(WIFEXITED(status)){¬
-       40         printf("CHild exited normally");¬
-       41     }else if (WIFSIGNALED(status)){¬
-       42         printf("killed by signal");¬
-       43     }¬
-       44 }¬
+		 * although scheduler has made sure that next_to_run process will be at higher
+		 * priority than the current process but before setting it active we will
+		 * do a check.
 		 */
+		if (hds_core_state.active_process_valid == false) {
+			/*
+			 * this is the initial condition. we will set the next_to_run process
+			 * as the active process.
+			 */
+			hds_core_state.active_process.arrival_time =
+					hds_core_state.next_to_run_process.arrival_time;
+			hds_core_state.active_process.cpu_req =
+					hds_core_state.next_to_run_process.cpu_req;
+			hds_core_state.active_process.memory_req =
+					hds_core_state.next_to_run_process.memory_req;
+			hds_core_state.active_process.pid =
+					hds_core_state.next_to_run_process.pid; // this should be zero for a beginning process
+			hds_core_state.active_process.printer_req =
+					hds_core_state.next_to_run_process.printer_req;
+			hds_core_state.active_process.priority =
+					hds_core_state.next_to_run_process.priority;
+			hds_core_state.active_process.scanner_req =
+					hds_core_state.next_to_run_process.scanner_req;
+
+			//validate active process
+			hds_core_state.active_process_valid = true;
+
+			//now invalidate the next_to_run process.
+			pthread_mutex_lock(&hds_core_state.next_to_run_process_lock);
+			hds_core_state.next_to_run_process_valid = false;
+			pthread_mutex_unlock(&hds_core_state.next_to_run_process_lock);
+		} else {
+			/*
+			 * active process has been serviced by cpu. so we will check if next
+			 * run process's priority is higher as compared to active process.
+			 * if not then we will continue executing active process. If yes
+			 * then we will degrade priority of active  process and move it back
+			 * to qeueues and set next_to_run process as the active process.
+			 */
+			if ((hds_core_state.next_to_run_process.priority
+					< hds_core_state.active_process.priority)
+					&& (hds_core_state.next_to_run_process_valid == true)) {
+				var_debug(
+						"cpu: Interrupting active process with process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
+						hds_core_state.next_to_run_process.pid,
+						hds_core_state.next_to_run_process.priority,
+						hds_core_state.next_to_run_process.cpu_req,
+						hds_core_state.next_to_run_process.memory_req,
+						hds_core_state.next_to_run_process.printer_req,
+						hds_core_state.next_to_run_process.scanner_req);
+				//current process will be interrupted.
+				degrade_priority_and_save_to_q(&hds_core_state.active_process);
+
+				//now set next_process as the active process
+				hds_core_state.active_process.arrival_time =
+						hds_core_state.next_to_run_process.arrival_time;
+				hds_core_state.active_process.cpu_req =
+						hds_core_state.next_to_run_process.cpu_req;
+				hds_core_state.active_process.memory_req =
+						hds_core_state.next_to_run_process.memory_req;
+				hds_core_state.active_process.pid =
+						hds_core_state.next_to_run_process.pid; // this should be zero for a beginning process
+				hds_core_state.active_process.printer_req =
+						hds_core_state.next_to_run_process.printer_req;
+				hds_core_state.active_process.priority =
+						hds_core_state.next_to_run_process.priority;
+				hds_core_state.active_process.scanner_req =
+						hds_core_state.next_to_run_process.scanner_req;
+
+				//validate active process
+				hds_core_state.active_process_valid = true;
+
+				//now invalidate the next_to_run process.
+				pthread_mutex_lock(&hds_core_state.next_to_run_process_lock);
+				hds_core_state.next_to_run_process_valid = false;
+				pthread_mutex_unlock(&hds_core_state.next_to_run_process_lock);
+			}
+			//else we will continue executing active process.
+		}
+
+		/*
+		 * if still we have an invalid active process then we go up. This will
+		 * ensure that we do not deal with bogus processes.
+		 */
+		if (hds_core_state.active_process_valid == false) {
+			serror("Active process is invalid..");
+			sleep(1);
+			continue;
+		}
+		// from here onwards we will have a valid active process
+
+		// ///////// Resource deallocation //////////////////
+		/*
+		 * if cpu_time of active process has become 0 then it means it's time
+		 * to kill it and deallocate all resoiurces
+		 * 1. kill it
+		 * 2. deallocate resources
+		 * 3. invalidate active process
+		 */
+		if (hds_core_state.active_process.cpu_req <= 0) {
+			if (hds_core_state.active_process.pid > 1) {
+				//kill it
+				var_debug("cpu: killing child process: %d",
+						hds_core_state.active_process.pid);
+				//remember that child process is already stopped so before
+				// killing it we will activate it
+				kill(hds_core_state.active_process.pid, SIGCONT);
+				//now kill it
+				kill(hds_core_state.active_process.pid, SIGTERM);
+
+				//deallocate resources
+				//collect this process
+				waitpid(hds_core_state.active_process.pid, &status, WNOHANG);
+
+				//invalidate it, such that it will be set as next_to_run process
+				// in next cycle
+				hds_core_state.active_process_valid = false;
+
+				//now go up
+				continue;
+			} else {
+				//this is probably a bogus process. how can a process have a pid
+				// less than 1 and also cpu_time less than or equal to 0.
+				// probably a config error
+				serror("Probably a bogus process.");
+				sleep(1);
+				continue;
+			}
+		}
+
+		/*
+		 * now we will execute active_process. howver we will check if it's the
+		 * first time for active_process. If not then execute it for 1 quantum
+		 * of time and update stats. If yes, the spawn a new process,save its pid
+		 * in the active process. execute it for 1 quantum and then update stats.
+		 *
+		 */
+		if (hds_core_state.active_process.pid == 0) {
+			//this is the first time for this process. we will fork a new child
+			// process
+
+			hds_core_state.active_process.pid = fork();
+			switch (hds_core_state.active_process.pid) {
+			case -1:
+				serror("cpu: fork() failed")
+				;
+				//this is bad
+				break;
+			case 0:
+				child_function();
+				break;
+			default:
+				//parent code
+				/*
+				 * since child is in an infinite loop. it will not come back
+				 * to execute next lines code. So we can continue our work even
+				 * though entire code will be duplicated in child.
+				 *
+				 * Since child will become active the moment it will be instantiated
+				 * we stop here so that we will run it later on.
+				 */
+				kill(hds_core_state.active_process.pid, SIGSTOP);
+				var_debug("cpu: spawned new child process: %d",
+						hds_core_state.active_process.pid)
+				;
+				break;
+			}
+		}
+		// The code following next, will never be executed in child.
+		// if not then, behaviour is undefined
+		var_debug(
+				"cpu: Going to run process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
+				hds_core_state.active_process.pid,
+				hds_core_state.active_process.priority,
+				hds_core_state.active_process.cpu_req,
+				hds_core_state.active_process.memory_req,
+				hds_core_state.active_process.printer_req,
+				hds_core_state.active_process.scanner_req);
+
+		// do the resource allocation here
+
+		//now run the child process
+		kill(hds_core_state.active_process.pid, SIGCONT);
+		sleep(1);
+		kill(hds_core_state.active_process.pid, SIGSTOP);
+
+		//now update stats for this process
+		hds_core_state.active_process.cpu_req =
+				hds_core_state.active_process.cpu_req - 1;
 	}
 	sdebug("cpu: Shutting down..");
+	/*
+	 * TODO: we need a cleanup routine whic will find all child processes who have been
+	 * spwaned and kill them. we can find such processes by examining all 4 queues
+	 * and looking for a process with pid > 1.
+	 */
 	pthread_exit(NULL );
 }
-static void child_function(){
+static void child_function() {
 	/*
 	 * what our processes would do ? Since I am not sure about whether debug()
 	 * routines would work in this situation. for now child process simply sleep
 	 * for a while. again back in infinite loop.
 	 */
-	while(1){
-		var_debug("Child process with PID: %d working.",getpid());
-		usleep(10000);
+	while (1) {
+//		var_debug("Child process with PID: %d working.", getpid());
+//		if (hds_state.shutdown_in_progress){
+//			exit(EXIT_SUCCESS);
+//		}
+		usleep(1000);
 	}
 }
 // //////////// Simple API for dealing with queues of type process_t //////
@@ -306,7 +792,7 @@ static int insert_process_to_q(struct process_queue_t **qhead,
 	//TODO: since granularity is in seconds,get time in seconds
 	node->arrival_time = gettime_in_nsecs();
 
-	node->cpu_time = process_frm_dispatch_list->cpu_req;
+	node->cpu_req = process_frm_dispatch_list->cpu_req;
 	node->memory_req = process_frm_dispatch_list->memory_req;
 	node->printer_req = process_frm_dispatch_list->printer_req;
 	node->priority = process_frm_dispatch_list->priority;
@@ -323,11 +809,10 @@ static int insert_process_to_q(struct process_queue_t **qhead,
 		(*q_last)->next = NULL;
 	}
 	return HDS_OK;
-
 }
-static struct process_queue_t * get_first_element(struct process_queue_t *qhead) {
-
-}
+//static struct process_queue_t * get_first_element(struct process_queue_t *qhead) {
+//
+//}
 static int remove_first_ele_from_dispatcher_q(
 		struct hds_process_t **dispatcher_list_head) {
 	//remove the first element
@@ -349,7 +834,7 @@ static int remove_first_ele_from_dispatcher_q(
 	return HDS_OK;
 }
 
-void print_current_cpu_stats(){
+void print_current_cpu_stats() {
 	/*
 	 * We will print info about active process,next_to_run_process and available
 	 * resources when demanded.

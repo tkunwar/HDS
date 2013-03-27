@@ -75,6 +75,9 @@ int init_hds_state() {
 	hds_state.log_ptr = NULL;
 	hds_state.read_input = NULL;
 	hds_state.output_screen = NULL;
+
+	hds_state.parent_pid = getpid();
+
 	return HDS_OK;
 }
 int open_log_file() {

@@ -24,7 +24,7 @@
 #include <stdbool.h>
 #include <error.h>
 #include <errno.h>
-#include <signal.h>¬
+#include <signal.h>
 #include <sys/types.h>
 #include <sys/wait.h>
 
@@ -103,7 +103,7 @@ struct HDS_STATE {
 	pthread_t hds_dispatcher;
 	pthread_t hds_scheduler;
 	pthread_t hds_cpu;
-
+	pid_t parent_pid;
 } hds_state;
 
 #define sprint_result(s) snprintf(hds_state.result_msg, LOG_BUFF_SIZE,s );\

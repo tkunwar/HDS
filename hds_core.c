@@ -10,7 +10,7 @@ static bool can_process_be_admitted(struct process_queue_t *next_to_run);
 static struct process_queue_t *find_next_process_tobe_executed();
 static void remove_process_from_queue(struct process_queue_t *p);
 static void degrade_priority_and_save_to_q(struct process_queue_t *p);
-static void del_node(struct process_queue_t *qhead,
+static void del_node(struct process_queue_t **qhead,
 		struct process_queue_t *to_be_deleted);
 static void child_function();
 
@@ -25,6 +25,7 @@ void init_hds_core_state() {
 			hds_core_state.p2q_last = hds_core_state.p3q =
 					hds_core_state.p3q_last = hds_core_state.rtq =
 							hds_core_state.rtq_last = NULL;
+
 	if (pthread_mutex_init(&hds_core_state.p1q_mutex, NULL ) != 0) {
 		serror("Failed to initialize mutex: p0q_mutex");
 	}
@@ -247,7 +248,7 @@ void *hds_scheduler(void *args) {
 		// we will check if active_process's is valid
 		if ((hds_core_state.active_process.priority < next_process->priority)
 				&& (hds_core_state.active_process_valid == true)) {
-			sdebug("Active process cant be interrupted !");
+			sdebug("scheduler: Active process cant be interrupted !");
 			sleep(1);
 			continue;
 		}
@@ -306,7 +307,8 @@ void *hds_scheduler(void *args) {
 		 * be replaced.
 		 */
 		if ((hds_core_state.next_to_run_process.priority
-				< next_process->priority)) {
+				<= next_process->priority)) {
+			// we will follow fcfs for processes with equal priority
 			//next_to_run process cant be replaced
 			sdebug("Cant replace next_to_run process");
 			sleep(1);
@@ -374,11 +376,10 @@ static void degrade_priority_and_save_to_q(struct process_queue_t *p) {
 	newp->pid = p->pid;
 	newp->printer_req = p->printer_req;
 	if (p->priority != 3) {
-		newp->priority = p->priority - 1;
+		newp->priority = p->priority + 1;
 	}
 
 	newp->scanner_req = p->scanner_req;
-
 	//now depending upon the priority of newp insert into a queue
 	switch (newp->priority) {
 	case 0:
@@ -414,48 +415,53 @@ static void remove_process_from_queue(struct process_queue_t *p) {
 	switch (p->priority) {
 	case 0:
 		pthread_mutex_lock(&hds_core_state.rtq_mutex);
-		del_node(hds_core_state.rtq, p);
+		del_node(&hds_core_state.rtq, p);
 		pthread_mutex_unlock(&hds_core_state.rtq_mutex);
 		break;
 	case 1:
-		sdebug("trying to lock p1q");
-		pthread_mutex_lock(&hds_core_state.p1q_mutex);
-		sdebug("got lock of p1q");
-		del_node(hds_core_state.p1q, p);
+		while ((pthread_mutex_trylock(&hds_core_state.p1q_mutex) == EBUSY)) {
+			sdebug("someone already has lock of p1q");
+			sleep(1);
+		}
+//		pthread_mutex_lock(&hds_core_state.p1q_mutex);
+		del_node(&hds_core_state.p1q, p);
 		pthread_mutex_unlock(&hds_core_state.p1q_mutex);
 		break;
 	case 2:
 		pthread_mutex_lock(&hds_core_state.p2q_mutex);
-		del_node(hds_core_state.p2q, p);
+		del_node(&hds_core_state.p2q, p);
 		pthread_mutex_unlock(&hds_core_state.p2q_mutex);
 		break;
 	case 3:
 		pthread_mutex_lock(&hds_core_state.p3q_mutex);
-		del_node(hds_core_state.p3q, p);
+		del_node(&hds_core_state.p3q, p);
 		pthread_mutex_unlock(&hds_core_state.p3q_mutex);
 		break;
 	default:
 		break;
 	}
-	sdebug("remove_pr_from returning");
 }
-static void del_node(struct process_queue_t *qhead,
+static void del_node(struct process_queue_t **qhead,
 		struct process_queue_t *to_be_deleted) {
-	struct process_queue_t *tmp = qhead;
+	struct process_queue_t *tmp = *qhead;
 	if (!qhead) {
 		//thats bad
 		return;
 	}
-
+	if (!*qhead) {
+		serror("Trying to delete a NULL node from process queue");
+		return;
+	}
 	//if head is to deleted
-	if (qhead == to_be_deleted) {
-		free(to_be_deleted);
-		qhead = NULL;
+	if (*qhead == to_be_deleted) {
+		tmp = *qhead;
+		*qhead = (*qhead)->next;
+		free(tmp);
 		return;
 	}
 	//find the element before to_be_deleted
-	for (; tmp->next != NULL && tmp->next != to_be_deleted; tmp = tmp->next)
-		;
+	for (; tmp->next != NULL && tmp->next != to_be_deleted; tmp = tmp->next);
+
 	//now tmp points to the one node before to_be_deleted
 	tmp->next = to_be_deleted->next;
 	tmp = to_be_deleted;
@@ -467,36 +473,45 @@ static struct process_queue_t *find_next_process_tobe_executed() {
 
 	pthread_mutex_lock(&hds_core_state.rtq_mutex);
 	//for realtime jobs, the process at head of queue will be executed
+	// that is use fcfs for realtime processes
 	if (hds_core_state.rtq != NULL ) {
-		return (hds_core_state.rtq);
+		node = hds_core_state.rtq;
 	}
 	pthread_mutex_unlock(&hds_core_state.rtq_mutex);
+	if (node)
+		return node;
 
+	node = NULL;
 	pthread_mutex_lock(&hds_core_state.p1q_mutex);
 	for (node = hds_core_state.p1q; node != NULL ; node = node->next) {
 		if (can_process_be_admitted(node) == true) {
-			return node;
+			break;
 		}
 	}
 	pthread_mutex_unlock(&hds_core_state.p1q_mutex);
+	if (node)
+		return node;
 
+	node = NULL;
 	pthread_mutex_lock(&hds_core_state.p2q_mutex);
 	for (node = hds_core_state.p2q; node != NULL ; node = node->next) {
 		if (can_process_be_admitted(node) == true) {
-			return node;
+			break;
 		}
 	}
 	pthread_mutex_unlock(&hds_core_state.p2q_mutex);
+	if (node)
+		return node;
 
+	node = NULL;
 	pthread_mutex_lock(&hds_core_state.p3q_mutex);
 	for (node = hds_core_state.p3q; node != NULL ; node = node->next) {
 		if (can_process_be_admitted(node) == true) {
-			return node;
+			break;
 		}
 	}
 	pthread_mutex_unlock(&hds_core_state.p3q_mutex);
-
-	return NULL ;
+	return node;
 }
 /**
  * @brief Check if this process can be admitted to cpu for executing in the next
@@ -552,7 +567,8 @@ void *hds_cpu(void *args) {
 		if (hds_state.shutdown_in_progress == true) {
 			break;
 		}
-		var_debug("cpu: parent: %d, I belong to %d process",hds_state.parent_pid,getpid());
+//		var_debug("cpu: parent: %d, I belong to %d process",
+//				hds_state.parent_pid, getpid());
 		/*
 		 * if next_to_run process's priority is invalid (-1) then it means that
 		 * scheduler has not submitted any job to us.

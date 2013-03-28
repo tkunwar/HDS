@@ -122,7 +122,7 @@ void process_user_response() {
 void hds_shutdown() {
 	//other stuff related to cleanup but it's a normal cleanup
 	//signal that we are shutting down
-	if (hds_state.parent_pid != getpid()){
+	if (hds_state.parent_pid != getpid()) {
 		//simply exit we are a child process
 		exit(EXIT_SUCCESS);
 	}
@@ -152,7 +152,10 @@ void hds_shutdown() {
 		fprintf(stderr, "\nError in collecting thread: hds_cpu");
 		exit(EXIT_FAILURE);
 	}
-
+	if (pthread_join(hds_state.hds_stats_manager, NULL ) != 0) {
+		fprintf(stderr, "\nError in collecting thread: hds_stats_manager");
+		exit(EXIT_FAILURE);
+	}
 	fclose(hds_state.log_ptr);
 	sigemptyset(&sigact.sa_mask);
 	ExitProgram(EXIT_SUCCESS);
@@ -219,6 +222,12 @@ int start_main_worker_threads() {
 	}
 	//create cpu_thread
 	if (pthread_create(&hds_state.hds_cpu, NULL, hds_cpu, NULL ) != 0) {
+		serror("\nFailed to create cpu thread");
+		return HDS_ERR_THREAD_INIT;
+	}
+	// create_stats thread
+	if (pthread_create(&hds_state.hds_stats_manager, NULL, hds_stats_manager,
+			NULL ) != 0) {
 		serror("\nFailed to create cpu thread");
 		return HDS_ERR_THREAD_INIT;
 	}

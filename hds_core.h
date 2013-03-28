@@ -45,6 +45,7 @@ struct hds_core_state_t{
 	 * then, dispatch list will need to be secured.
 	 */
 	struct process_queue_t active_process;
+	pthread_mutex_t active_process_lock;
 	pthread_mutex_t next_to_run_process_lock;
 	struct process_queue_t next_to_run_process;
 	bool active_process_valid;
@@ -56,5 +57,5 @@ void init_hds_resource_state();
 void *hds_dispatcher(void *args);
 void *hds_scheduler(void *args);
 void *hds_cpu(void *args);
-
+void *hds_stats_manager(void *args);
 #endif /* HDS_CORE_H_ */

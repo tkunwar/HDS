@@ -77,7 +77,7 @@ int init_hds_state() {
 	hds_state.output_screen = NULL;
 
 	hds_state.parent_pid = getpid();
-
+	hds_state.stats_manager_active = false;
 	return HDS_OK;
 }
 int open_log_file() {
@@ -299,24 +299,6 @@ static void redraw_cdkscreens() {
 	drawCDKScreen(hds_state.input_win.cdksptr);
 	drawCDKScreen(hds_state.console_win.cdksptr);
 }
-/**
- * @brief Display help options
- *
- * Displays help options in a popup window. Also do a redraw of all cdkscreens
- * since we will be displaying popup windows in master_cdkscreen.
- */
-void display_help() {
-	const char *mesg[15];
-	const char *buttons[] = { "<OK>" };
-	mesg[0] = "<C>This program shows how a compressed paging mechanism has";
-	mesg[1] = "<C>advantage over traditional paging systems.";
-	mesg[2] = "<C></U>Project authors";
-	mesg[3] = "<C>Amrita,Rashmi and Varsha";
-
-	popupDialog(hds_state.master_screen, (CDK_CSTRING2) mesg, 4,
-			(CDK_CSTRING2) buttons, 1);
-	redraw_cdkscreens();
-}
 
 /**
  * @brief Returns current time in nanoseconds
@@ -359,11 +341,17 @@ void write_to_result_window(const char* msg,int num_rows){
 }
 void execute_commands(const char *command){
 	if ( (strcmp(command,"help") ==0) || (strcmp(command,"HELP") ==0) ){
+		hds_state.stats_manager_active = false;
 		print_help();
 	}
 	else if ((strcmp(command,"print_dl") == 0)){
+		hds_state.stats_manager_active = false;
 		print_loaded_configs();
-	}else{
+	}else if ((strcmp(command,"print_stats") == 0)){
+		hds_state.stats_manager_active = true;
+	}
+	else{
+		hds_state.stats_manager_active = false;
 		clear_result_window();
 		vprint_result("<C></16>Command <%s> is not recognized !!<!16>",command);
 	}
@@ -384,6 +372,7 @@ void print_help(){
 	sprint_result("Following lists supported commands.");
 	sprint_result("\t\t</32>Command<!32>\t\t\t </24>Action<!24>");
 	sprint_result("\t\tprint_dl\t Shows the job dispatch list of processes loaded from config file.");
+	sprint_result("\t\tprint_stats\t Shows the current system statistics.");
 	sprint_result(" ");
 	sprint_result("</16>Note:<!16> Commands are case sensitive.");
 }

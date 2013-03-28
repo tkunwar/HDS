@@ -103,7 +103,9 @@ struct HDS_STATE {
 	pthread_t hds_dispatcher;
 	pthread_t hds_scheduler;
 	pthread_t hds_cpu;
+	pthread_t hds_stats_manager;
 	pid_t parent_pid;
+	bool stats_manager_active;
 } hds_state;
 
 #define sprint_result(s) snprintf(hds_state.result_msg, LOG_BUFF_SIZE,s );\

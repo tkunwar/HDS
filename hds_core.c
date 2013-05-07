@@ -3,7 +3,7 @@
 #include "hds_core.h"
 static int remove_first_ele_from_dispatcher_q(
 		struct hds_process_t **dispatcher_list_head);
-static int insert_process_to_q(struct process_queue_t **qhead,
+static int insert_process_to_q_from_dispatch_list(struct process_queue_t **qhead,
 		struct process_queue_t **q_last,
 		struct hds_process_t *process_frm_dispatch_list);
 static bool can_process_be_admitted(struct process_queue_t *next_to_run);
@@ -13,7 +13,11 @@ static void degrade_priority_and_save_to_q(struct process_queue_t *p);
 static void del_node(struct process_queue_t **qhead,
 		struct process_queue_t *to_be_deleted);
 static void child_function();
-
+static void process_user_jobq(struct process_queue_t **qhead);
+static int insert_process_to_q_from_user_job_q(struct process_queue_t **qhead,
+		struct process_queue_t **q_last,
+		struct process_queue_t *process_frm_user_jobq);
+static int remove_first_ele_from_user_job_q(struct process_queue_t **user_job_q);
 void init_hds_resource_state() {
 	hds_resource_state.avail_memory = hds_config.max_resources.memory;
 	hds_resource_state.avail_printer = hds_config.max_resources.printer;
@@ -25,6 +29,7 @@ void init_hds_core_state() {
 			hds_core_state.p2q_last = hds_core_state.p3q =
 					hds_core_state.p3q_last = hds_core_state.rtq =
 							hds_core_state.rtq_last = NULL;
+	hds_core_state.user_job_q = hds_core_state.user_job_q_last = NULL;
 
 	if (pthread_mutex_init(&hds_core_state.p1q_mutex, NULL ) != 0) {
 		serror("Failed to initialize mutex: p0q_mutex");
@@ -47,10 +52,9 @@ void init_hds_core_state() {
 			!= 0) {
 		serror("Failed to initialize mutex: avail_resource_mutex");
 	}
-	if (pthread_mutex_init(&hds_core_state.active_process_lock, NULL )
-				!= 0) {
-			serror("Failed to initialize mutex: active_process_lock");
-		}
+	if (pthread_mutex_init(&hds_core_state.active_process_lock, NULL ) != 0) {
+		serror("Failed to initialize mutex: active_process_lock");
+	}
 //	hds_core_state.active_process.pid = hds_core_state.next_to_run_process.pid =
 //			-1; //to check if next_to_run process has been seen by cpu
 //	hds_core_state.active_process.priority =
@@ -97,7 +101,7 @@ void *hds_dispatcher(void *args) {
 		case 0:
 			//realtime process -- highest priority and non-interruptable
 			pthread_mutex_lock(&hds_core_state.rtq_mutex);
-			if (insert_process_to_q(&hds_core_state.rtq,
+			if (insert_process_to_q_from_dispatch_list(&hds_core_state.rtq,
 					&hds_core_state.rtq_last,
 					hds_config.job_dispatch_list)!=HDS_OK) {
 				serror("Failed to insert a process in real time Q");
@@ -118,83 +122,23 @@ void *hds_dispatcher(void *args) {
 			//remove this process from dispatch queue
 			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
 			break;
-		case 1:
-			//user time process of priority 1 -- highest priority
-			pthread_mutex_lock(&hds_core_state.p1q_mutex);
-			if (insert_process_to_q(&hds_core_state.p1q,
-					&hds_core_state.p1q_last,
-					hds_config.job_dispatch_list)!=HDS_OK) {
-				serror("Failed to insert a process in p1Q");
-				//perform cleanup if needed
-				break;
-			}
-			pthread_mutex_unlock(&hds_core_state.p1q_mutex);
-//			var_debug(
-//					"dispatcher: Adding process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d) to p1q",
-//					hds_config.job_dispatch_list->pid,
-//					hds_config.job_dispatch_list->priority,
-//					hds_config.job_dispatch_list->cpu_req,
-//					hds_config.job_dispatch_list->memory_req,
-//					hds_config.job_dispatch_list->printer_req,
-//					hds_config.job_dispatch_list->scanner_req)
-//			;
-			//remove this process from dispatch queue
-			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
-			break;
-		case 2:
-			//user time process of priority 2 -- medium priority
-			pthread_mutex_lock(&hds_core_state.p2q_mutex);
-			if (insert_process_to_q(&hds_core_state.p2q,
-					&hds_core_state.p2q_last,
-					hds_config.job_dispatch_list)!=HDS_OK) {
-				serror("Failed to insert a process in p2Q");
-				//perform cleanup if needed
-				break;
-			}
-			pthread_mutex_unlock(&hds_core_state.p2q_mutex);
-//			var_debug(
-//					"dispatcher: Adding process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d) to p2q",
-//					hds_config.job_dispatch_list->pid,
-//					hds_config.job_dispatch_list->priority,
-//					hds_config.job_dispatch_list->cpu_req,
-//					hds_config.job_dispatch_list->memory_req,
-//					hds_config.job_dispatch_list->printer_req,
-//					hds_config.job_dispatch_list->scanner_req)
-//			;
-			//remove this process from dispatch queue
-			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
-			break;
-		case 3:
-			//user time process of priority 3 -- lowest priority
-			pthread_mutex_lock(&hds_core_state.p3q_mutex);
-			if (insert_process_to_q(&hds_core_state.p3q,
-					&hds_core_state.p3q_last,
-					hds_config.job_dispatch_list)!=HDS_OK) {
-				serror("Failed to insert a process in p3Q");
-				//perform cleanup if needed
-				break;
-			}
-			pthread_mutex_unlock(&hds_core_state.p3q_mutex);
-//			var_debug(
-//					"dispatcher: Adding process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d) to p3q",
-//					hds_config.job_dispatch_list->pid,
-//					hds_config.job_dispatch_list->priority,
-//					hds_config.job_dispatch_list->cpu_req,
-//					hds_config.job_dispatch_list->memory_req,
-//					hds_config.job_dispatch_list->printer_req,
-//					hds_config.job_dispatch_list->scanner_req)
-//			;
-			//remove this process from dispatch queue
-			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
-			break;
+
 		default:
-			//this is a process having unrecognized priority. we remove it
-			serror(
-					"Found a process with bogus priority. Removing from the list")
-			;
+			//this is a user process so we add it to user job queue.
+			// all processes other than realtime processes go this user_job_q
+			if (insert_process_to_q_from_dispatch_list(&hds_core_state.user_job_q,
+					&hds_core_state.user_job_q_last,
+					hds_config.job_dispatch_list) != HDS_OK) {
+				serror("Failed to insert a process in user job q");
+				//perform cleanup if needed
+				break;
+			}
 			remove_first_ele_from_dispatcher_q(&hds_config.job_dispatch_list);
-			break;
+			// now we need to process processes in job_q and put them to respective
+			// process queues
+			process_user_jobq(&hds_core_state.user_job_q);
 		}
+
 		//now sleep for 1 seconds before going to look for a new process
 		sleep(1);
 	}
@@ -202,6 +146,60 @@ void *hds_dispatcher(void *args) {
 	//clean dispatch list
 	cleanup_process_dispatch_list();
 	pthread_exit(NULL );
+}
+/**
+ * @brief Move processes from user_jobq to their respective priority based queues.
+ * @param qhead The pointer to the head of the user job queue.
+ */
+static void process_user_jobq(struct process_queue_t **qhead) {
+	switch ((*qhead)->priority) {
+	case 1:
+		//user time process of priority 1 -- highest priority
+		pthread_mutex_lock(&hds_core_state.p1q_mutex);
+		if (insert_process_to_q_from_user_job_q(&hds_core_state.p1q,
+				&hds_core_state.p1q_last, *qhead) != HDS_OK) {
+			serror("Failed to insert a process in p1Q");
+			//perform cleanup if needed
+			break;
+		}
+		pthread_mutex_unlock(&hds_core_state.p1q_mutex);
+		//remove this process from dispatch queue
+		remove_first_ele_from_user_job_q(qhead);
+		break;
+	case 2:
+		//user time process of priority 2 -- medium priority
+		pthread_mutex_lock(&hds_core_state.p2q_mutex);
+		if (insert_process_to_q_from_user_job_q(&hds_core_state.p2q,
+				&hds_core_state.p2q_last, *qhead) != HDS_OK) {
+			serror("Failed to insert a process in p2Q");
+			//perform cleanup if needed
+			break;
+		}
+		pthread_mutex_unlock(&hds_core_state.p2q_mutex);
+		//remove this process from dispatch queue
+		remove_first_ele_from_user_job_q(qhead);
+		break;
+	case 3:
+		//user time process of priority 3 -- lowest priority
+		pthread_mutex_lock(&hds_core_state.p3q_mutex);
+		if (insert_process_to_q_from_user_job_q(&hds_core_state.p3q,
+				&hds_core_state.p3q_last, *qhead) != HDS_OK) {
+			serror("Failed to insert a process in p3Q");
+			//perform cleanup if needed
+			break;
+		}
+		pthread_mutex_unlock(&hds_core_state.p3q_mutex);
+		//remove this process from dispatch queue
+		remove_first_ele_from_user_job_q(qhead);
+		break;
+	default:
+		//this is a process having unrecognized priority. we remove it
+		serror(
+				"Found a process with bogus priority. Removing from the user job list")
+		;
+		remove_first_ele_from_user_job_q(qhead);
+		break;
+	}
 }
 /**
  * @brief Main routine for scheduler thread
@@ -803,8 +801,58 @@ static void child_function() {
 	}
 }
 // //////////// Simple API for dealing with queues of type process_t //////
+static int insert_process_to_q_from_user_job_q(struct process_queue_t **qhead,
+		struct process_queue_t **q_last,
+		struct process_queue_t *process_frm_user_jobq) {
+	struct process_queue_t *node = NULL;
+	node = (struct process_queue_t *) malloc(sizeof(struct process_queue_t));
+	if (!node) {
+		serror("malloc: failed ");
+		return HDS_ERR_NO_MEM;
+	}
+	//TODO: since granularity is in seconds,get time in seconds
+	node->arrival_time = gettime_in_nsecs();
 
-static int insert_process_to_q(struct process_queue_t **qhead,
+	node->cpu_req = process_frm_user_jobq->cpu_req;
+	node->memory_req = process_frm_user_jobq->memory_req;
+	node->printer_req = process_frm_user_jobq->printer_req;
+	node->priority = process_frm_user_jobq->priority;
+	node->scanner_req = process_frm_user_jobq->scanner_req;
+	node->pid = process_frm_user_jobq->pid;
+	node->next = NULL;
+
+	if (!*qhead || !*q_last) {
+		//initial state or case where there is only one element in the user job
+		// q and that has been deleted.
+		*q_last = *qhead = node;
+	} else {
+		(*q_last)->next = node;
+		*q_last = node;
+		(*q_last)->next = NULL;
+	}
+	return HDS_OK;
+}
+static int remove_first_ele_from_user_job_q(struct process_queue_t **user_job_q) {
+	//remove the first element
+	struct process_queue_t *to_be_deleted = *user_job_q;
+	if (hds_core_state.user_job_q == NULL ) {
+		swarn("User Job queue is empty !! Nothing to remove");
+		return HDS_OK;
+	}
+	//	var_debug("Removing [%u] next [%u]",to_be_deleted->page.page_id,((*node)->next)->page.page_id);
+	//	var_debug("Trying to remove page %u", (*node)->page.page_id);
+	// first case itself should handle head being null. this one is not needed.
+	if (!*user_job_q) {
+		serror("Trying to delete a NULL page from user job q");
+		return HDS_ERR_MEM_FAULT;
+	}
+	// &hds_
+	hds_core_state.user_job_q = (*user_job_q)->next;
+	free(to_be_deleted);
+	return HDS_OK;
+}
+
+static int insert_process_to_q_from_dispatch_list(struct process_queue_t **qhead,
 		struct process_queue_t **q_last,
 		struct hds_process_t *process_frm_dispatch_list) {
 	struct process_queue_t *node = NULL;
@@ -824,7 +872,7 @@ static int insert_process_to_q(struct process_queue_t **qhead,
 	node->pid = process_frm_dispatch_list->pid;
 	node->next = NULL;
 
-	if (!*qhead && !*q_last) {
+	if (!*qhead || !*q_last) {
 		//initial state
 		*q_last = *qhead = node;
 	} else {
@@ -866,32 +914,40 @@ void print_current_cpu_stats() {
 	sprint_result("<C>System Statistics");
 	sprint_result("<C>Resource Status");
 	sprint_result("\t\t\tMemory\tPrinter\tScanner");
-	vprint_result("Max. Resources: \t%d\t%d\t%d",hds_config.max_resources.memory,
-			hds_config.max_resources.printer,hds_config.max_resources.scanner);
+	vprint_result("Max. Resources: \t%d\t%d\t%d",
+			hds_config.max_resources.memory, hds_config.max_resources.printer,
+			hds_config.max_resources.scanner);
 	pthread_mutex_lock(&hds_resource_state.avail_resource_mutex);
-	vprint_result("Avail. Resources: \t%d\t%d\t%d",hds_resource_state.avail_memory,
-				hds_resource_state.avail_printer,hds_resource_state.avail_scanner);
+	vprint_result("Avail. Resources: \t%d\t%d\t%d",
+			hds_resource_state.avail_memory, hds_resource_state.avail_printer,
+			hds_resource_state.avail_scanner);
 	pthread_mutex_unlock(&hds_resource_state.avail_resource_mutex);
 	sprint_result("<C>Process Status");
 	sprint_result("\t\t PID\tPRI\tCPU_REQ\tMEM_REQ\tPRN_REQ\tSCN_REQ");
 	pthread_mutex_lock(&hds_core_state.active_process_lock);
-	vprint_result("Active:\t\t%d\t%d\t%d\t%d\t%d\t%d",hds_core_state.active_process.pid,
-			hds_core_state.active_process.priority,hds_core_state.active_process.cpu_req,
-			hds_core_state.active_process.memory_req,hds_core_state.active_process.printer_req,
+	vprint_result("Active:\t\t%d\t%d\t%d\t%d\t%d\t%d",
+			hds_core_state.active_process.pid,
+			hds_core_state.active_process.priority,
+			hds_core_state.active_process.cpu_req,
+			hds_core_state.active_process.memory_req,
+			hds_core_state.active_process.printer_req,
 			hds_core_state.active_process.scanner_req);
 	pthread_mutex_unlock(&hds_core_state.active_process_lock);
 	pthread_mutex_lock(&hds_core_state.next_to_run_process_lock);
-	vprint_result("NextSchdld:\t%d\t%d\t%d\t%d\t%d\t%d",hds_core_state.next_to_run_process.pid,
-				hds_core_state.next_to_run_process.priority,hds_core_state.next_to_run_process.cpu_req,
-				hds_core_state.next_to_run_process.memory_req,hds_core_state.next_to_run_process.printer_req,
-				hds_core_state.next_to_run_process.scanner_req);
+	vprint_result("NextSchdld:\t%d\t%d\t%d\t%d\t%d\t%d",
+			hds_core_state.next_to_run_process.pid,
+			hds_core_state.next_to_run_process.priority,
+			hds_core_state.next_to_run_process.cpu_req,
+			hds_core_state.next_to_run_process.memory_req,
+			hds_core_state.next_to_run_process.printer_req,
+			hds_core_state.next_to_run_process.scanner_req);
 	pthread_mutex_unlock(&hds_core_state.next_to_run_process_lock);
-	//we can print the original loaded process dispactch queue
-	//we will need to maintain one extra field in process structure that is name.
+	// we can print the original loaded process dispactch queue
+	// we will need to maintain one extra field in process structure that is name.
 	// it can be populated at runtime by dispatcher and will help in giving a
 	// proper identification. names will be like: P1,P2,P3 etc. Note that name will
 	// be just an integer but when accessing it, prefix it by 'P'
-	//also we will maintaina execution queue which will be an array maintained
+	// also we will maintaina execution queue which will be an array maintained
 	// by cpu thread which will just point out that for every quantum which process
 	// was executed. like : 1,3,3,3,2,1,4,1 but will be printed as :
 	// P1,P3,P3,P3,P2,P1,P4,P1

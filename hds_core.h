@@ -29,6 +29,7 @@ struct process_queue_t{
 
 struct hds_core_state_t{
 	struct process_queue_t *rtq,*rtq_last;
+	struct process_queue_t *user_job_q,*user_job_q_last;
 	struct process_queue_t *p1q,*p1q_last;
 	struct process_queue_t *p2q,*p2q_last;
 	struct process_queue_t *p3q,*p3q_last;

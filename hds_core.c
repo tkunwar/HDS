@@ -1024,6 +1024,12 @@ void *hds_stats_manager(void *args) {
 }
 
 // //////////// Memory mgmt API ////////////////////////
+/**
+ * @brief Allocate memory for the given PID.
+ * @param pid The process id for which memory allocation request has been made.
+ * @param mem_req Memory required in MBs.
+ * @return A memory handle on success or 0 indicating failure.
+ */
 MEM_HANDLE allocate_mem(unsigned int pid,unsigned int mem_req){
 	/*
 	 * Note: For any allocation made here , the changes must be reflected in
@@ -1050,6 +1056,11 @@ MEM_HANDLE allocate_mem(unsigned int pid,unsigned int mem_req){
 	 * (25-12 +1) = 14 .
 	 *
 	 */
+	if (hds_core_state.global_memory_info.mem_available <mem_req){
+		return 0;
+	}
+	//check free pool
+
 }
 void free_mem(unsigned int pid,MEM_HANDLE mem_handle){
 	/*

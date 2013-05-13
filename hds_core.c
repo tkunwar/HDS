@@ -153,6 +153,7 @@ void *hds_dispatcher(void *args) {
 			// now we need to process processes in job_q and put them to respective
 			// process queues
 			process_user_jobq(&hds_core_state.user_job_q);
+			break;
 		}
 
 		//now sleep for 1 seconds before going to look for a new process

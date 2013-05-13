@@ -4,28 +4,21 @@
 
 #include "hds_common.h"
 #define SMALLEST_TIME_QUANTUM 1
+typedef unsigned int MEM_HANDLE;
+#define MEM_BLOCK_INACTIVE -1
+
 /**
  * @struct hds_resource_state
  * @brief Denotes the current state of resources available for further allocation.
  */
-struct hds_resource_state_t{
+struct hds_global_resource_state_t{
 	int avail_memory;
 	int avail_scanner;
 	int avail_printer;
 	pthread_mutex_t avail_resource_mutex;
-}hds_resource_state;
+}max_available_resource;
 
-struct process_queue_t{
-	unsigned long int arrival_time;
-	int priority;
-	int cpu_req;
-	int memory_req;
-	int printer_req;
-	int scanner_req;
-	int pid; /**< A non zero pid would mean it has not yet run for once. Once a process runs
-	 	 	 	 	 	 it will have a valid pid. It could be in either suspended/running state.*/
-	struct process_queue_t *next;
-};
+
 struct global_memory_pool_info_t{
 	unsigned int max_mem_size;
 	unsigned int mem_available;
@@ -44,6 +37,37 @@ struct mem_block_t{
 	unsigned int end_pos; /**< End position for this block.*/
 	struct mem_block_t *next;
 };
+/**
+ * @struct hds_resource_t
+ * @brief This structure holds information about allocated resources to a process.
+ * 		This structure will be present for every process and will be part of
+ * 		the process structure.
+ */
+struct hds_allocated_resource_t{
+	unsigned int mem_block_handle; /**< The pointer to memory block that has been
+	 	 	 	 	 	 	 	 	 	allocated to a process. Note that in ideal
+	 	 	 	 	 	 	 	 	 	conditions, we expect it to be a list of
+	 	 	 	 	 	 	 	 	 	handles. But for simplicity, we assume that
+	 	 	 	 	 	 	 	 	 	per process there will be only single
+	 	 	 	 	 	 	 	 	 	memory allocation request and thus, single
+	 	 	 	 	 	 	 	 	 	memory_block_handle.
+	 	 	 	 	 	 	 	 	 	*/
+//	int printer_res;
+//	int scanner_res;
+};
+struct process_queue_t{
+	unsigned long int arrival_time;
+	int priority;
+	int cpu_req;
+	int memory_req;
+	int printer_req;
+	int scanner_req;
+	int pid; /**< A non zero pid would mean it has not yet run for once. Once a process runs
+	 	 	 	 	 	 it will have a valid pid. It could be in either suspended/running state.*/
+	struct hds_allocated_resource_t allocate_resource;
+	struct process_queue_t *next;
+};
+
 struct hds_core_state_t{
 	struct process_queue_t *rtq,*rtq_last;
 	struct process_queue_t *user_job_q,*user_job_q_last;
@@ -67,8 +91,9 @@ struct hds_core_state_t{
 	 */
 	struct process_queue_t active_process;
 	pthread_mutex_t active_process_lock;
-	pthread_mutex_t next_to_run_process_lock;
 	struct process_queue_t next_to_run_process;
+	pthread_mutex_t next_to_run_process_lock;
+
 	bool active_process_valid;
 	bool next_to_run_process_valid;
 }hds_core_state;

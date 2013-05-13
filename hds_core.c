@@ -3,8 +3,8 @@
 #include "hds_core.h"
 static int remove_first_ele_from_dispatcher_q(
 		struct hds_process_t **dispatcher_list_head);
-static int insert_process_to_q_from_dispatch_list(struct process_queue_t **qhead,
-		struct process_queue_t **q_last,
+static int insert_process_to_q_from_dispatch_list(
+		struct process_queue_t **qhead, struct process_queue_t **q_last,
 		struct hds_process_t *process_frm_dispatch_list);
 static bool can_process_be_admitted(struct process_queue_t *next_to_run);
 static struct process_queue_t *find_next_process_tobe_executed();
@@ -18,13 +18,17 @@ static int insert_process_to_q_from_user_job_q(struct process_queue_t **qhead,
 		struct process_queue_t **q_last,
 		struct process_queue_t *process_frm_user_jobq);
 static int remove_first_ele_from_user_job_q(struct process_queue_t **user_job_q);
+static int allocate_resources(struct process_queue_t *process);
+static int free_resources(struct process_queue_t *process);
 void init_hds_resource_state() {
 	// available _memory will at any point be less than 64 MB. Since that much
 	// we are reserving for realtime processes.
-	hds_resource_state.avail_memory = hds_config.max_resources.memory-64;
+	// NOTE: Any resource allocation/deallocation must explicittly update
+	// global hds_resource_state fields.
+	max_available_resource.avail_memory = hds_config.max_resources.memory - 64;
 
-	hds_resource_state.avail_printer = hds_config.max_resources.printer;
-	hds_resource_state.avail_scanner = hds_config.max_resources.scanner;
+	max_available_resource.avail_printer = hds_config.max_resources.printer;
+	max_available_resource.avail_scanner = hds_config.max_resources.scanner;
 }
 void init_hds_core_state() {
 	//init the process queues
@@ -51,7 +55,7 @@ void init_hds_core_state() {
 			!= 0) {
 		serror("Failed to initialize mutex: next_to_run_process_mutex");
 	}
-	if (pthread_mutex_init(&hds_resource_state.avail_resource_mutex, NULL )
+	if (pthread_mutex_init(&max_available_resource.avail_resource_mutex, NULL )
 			!= 0) {
 		serror("Failed to initialize mutex: avail_resource_mutex");
 	}
@@ -68,15 +72,19 @@ void init_hds_core_state() {
 
 	// Initialize global memory pool info.
 	hds_core_state.mem_block_list = hds_core_state.mem_block_list_last = NULL;
-	hds_core_state.global_memory_info.max_mem_size = (hds_resource_state.avail_memory);
-	hds_core_state.global_memory_info.mem_available = hds_core_state.global_memory_info.max_mem_size;
+	hds_core_state.global_memory_info.max_mem_size =
+			(max_available_resource.avail_memory);
+	hds_core_state.global_memory_info.mem_available =
+			hds_core_state.global_memory_info.max_mem_size;
 	hds_core_state.global_memory_info.mem_block_id_counter = 1;
 	/*
 	 * We will first 64 MB for realtime processes. So free_pool will start from
 	 * 65 till hds_config.max_resources.memory
 	 */
 	hds_core_state.global_memory_info.free_pool_start = 65;
-	hds_core_state.global_memory_info.free_pool_start = hds_config.max_resources.memory;
+	hds_core_state.global_memory_info.free_pool_end =
+			hds_config.max_resources.memory; // should always point to hds_config.max_resources.memory
+
 
 }
 /**
@@ -142,8 +150,8 @@ void *hds_dispatcher(void *args) {
 		default:
 			//this is a user process so we add it to user job queue.
 			// all processes other than realtime processes go this user_job_q
-			if (insert_process_to_q_from_dispatch_list(&hds_core_state.user_job_q,
-					&hds_core_state.user_job_q_last,
+			if (insert_process_to_q_from_dispatch_list(
+					&hds_core_state.user_job_q, &hds_core_state.user_job_q_last,
 					hds_config.job_dispatch_list) != HDS_OK) {
 				serror("Failed to insert a process in user job q");
 				//perform cleanup if needed
@@ -542,11 +550,11 @@ static struct process_queue_t *find_next_process_tobe_executed() {
  */
 static bool can_process_be_admitted(struct process_queue_t *next_to_run) {
 	bool can_be_admitted = false;
-	pthread_mutex_lock(&hds_resource_state.avail_resource_mutex);
-	if ((next_to_run->memory_req < hds_resource_state.avail_memory)) {
+	pthread_mutex_lock(&max_available_resource.avail_resource_mutex);
+	if ((next_to_run->memory_req < max_available_resource.avail_memory)) {
 		can_be_admitted = true;
 	}
-	pthread_mutex_unlock(&hds_resource_state.avail_resource_mutex);
+	pthread_mutex_unlock(&max_available_resource.avail_resource_mutex);
 	return can_be_admitted;
 }
 /**
@@ -713,7 +721,8 @@ void *hds_cpu(void *args) {
 				//now kill it
 				kill(hds_core_state.active_process.pid, SIGTERM);
 
-				//deallocate resources
+				// *****deallocate resources *****
+
 				//collect this process
 				waitpid(hds_core_state.active_process.pid, &status, WNOHANG);
 
@@ -734,21 +743,19 @@ void *hds_cpu(void *args) {
 		}
 
 		/*
-		 * now we will execute active_process. howver we will check if it's the
+		 * now we will execute active_process. however we will check if it's the
 		 * first time for active_process. If not then execute it for 1 quantum
 		 * of time and update stats. If yes, the spawn a new process,save its pid
 		 * in the active process. execute it for 1 quantum and then update stats.
 		 *
 		 */
 		if (hds_core_state.active_process.pid == 0) {
-			//this is the first time for this process. we will fork a new child
+			// this is the first time for this process. we will fork a new child
 			// process
-
 			hds_core_state.active_process.pid = fork();
 			switch (hds_core_state.active_process.pid) {
 			case -1:
-				serror("cpu: fork() failed")
-				;
+				serror("cpu: fork() failed");
 				//this is bad
 				break;
 			case 0:
@@ -762,12 +769,19 @@ void *hds_cpu(void *args) {
 				 * though entire code will be duplicated in child.
 				 *
 				 * Since child will become active the moment it will be instantiated
-				 * we stop here so that we will run it later on.
+				 * we stop it here so that we will run it later on.
 				 */
 				kill(hds_core_state.active_process.pid, SIGSTOP);
 				var_debug("cpu: spawned new child process: %d",
 						hds_core_state.active_process.pid)
 				;
+				/*
+				 * Our resource allocation routine requires the pid therefore,
+				 * we will perform resource allocation once we have obtained the
+				 * pid.
+				 */
+				// ****do the resource allocation here ******
+
 				break;
 			}
 		}
@@ -782,8 +796,6 @@ void *hds_cpu(void *args) {
 //				hds_core_state.active_process.printer_req,
 //				hds_core_state.active_process.scanner_req);
 
-		// do the resource allocation here
-
 		//now run the child process
 		kill(hds_core_state.active_process.pid, SIGCONT);
 		sleep(1);
@@ -797,19 +809,34 @@ void *hds_cpu(void *args) {
 	}
 	sdebug("cpu: Shutting down..");
 	/*
-	 * TODO: we need a cleanup routine whic will find all child processes who have been
+	 * TODO: we need a cleanup routine which will find all child processes who have been
 	 * spwaned and kill them. we can find such processes by examining all 4 queues
 	 * and looking for a process with pid > 1.
 	 */
 	pthread_exit(NULL );
 }
+/**
+ * @brief This routine must do all the resource allocation for a given process.
+ * 	   Therefore it will recieve a process structure which will define the
+ * 	   resource requirements for that process.
+ */
+static int allocate_resources(struct process_queue_t *process) {
+	unsigned int mem_handle = -1;
+	if (process->pid == -1) {
+		return HDS_ERR_INVALID_PROCESS;
+	}
+	//begin memory allocation for this routine.
 
-void process_loader(){
-	/*
-	 * 1. This routine must do all the resource allocation for a given process.
-	 * 	   Therefore it will recieve a process structure which will define the
-	 * 	   resource requirements for that process.
-	 */
+	return HDS_OK;
+}
+/**
+ * @brief Free up any resources held by this process.
+ * @param process The process which is to be dealocated.
+ * @return
+ */
+static int free_resources(struct process_queue_t *process){
+
+	return HDS_OK;
 }
 static void child_function() {
 	/*
@@ -877,8 +904,8 @@ static int remove_first_ele_from_user_job_q(struct process_queue_t **user_job_q)
 	return HDS_OK;
 }
 
-static int insert_process_to_q_from_dispatch_list(struct process_queue_t **qhead,
-		struct process_queue_t **q_last,
+static int insert_process_to_q_from_dispatch_list(
+		struct process_queue_t **qhead, struct process_queue_t **q_last,
 		struct hds_process_t *process_frm_dispatch_list) {
 	struct process_queue_t *node = NULL;
 	node = (struct process_queue_t *) malloc(sizeof(struct process_queue_t));
@@ -942,11 +969,12 @@ void print_current_cpu_stats() {
 	vprint_result("Max. Resources: \t%d\t%d\t%d",
 			hds_config.max_resources.memory, hds_config.max_resources.printer,
 			hds_config.max_resources.scanner);
-	pthread_mutex_lock(&hds_resource_state.avail_resource_mutex);
+	pthread_mutex_lock(&max_available_resource.avail_resource_mutex);
 	vprint_result("Avail. Resources: \t%d\t%d\t%d",
-			hds_resource_state.avail_memory, hds_resource_state.avail_printer,
-			hds_resource_state.avail_scanner);
-	pthread_mutex_unlock(&hds_resource_state.avail_resource_mutex);
+			max_available_resource.avail_memory,
+			max_available_resource.avail_printer,
+			max_available_resource.avail_scanner);
+	pthread_mutex_unlock(&max_available_resource.avail_resource_mutex);
 	sprint_result("<C>Process Status");
 	sprint_result("\t\t PID\tPRI\tCPU_REQ\tMEM_REQ\tPRN_REQ\tSCN_REQ");
 	pthread_mutex_lock(&hds_core_state.active_process_lock);
@@ -993,4 +1021,80 @@ void *hds_stats_manager(void *args) {
 	}
 	sdebug("stats manager shutting down");
 	pthread_exit(NULL );
+}
+
+// //////////// Memory mgmt API ////////////////////////
+MEM_HANDLE allocate_mem(unsigned int pid,unsigned int mem_req){
+	/*
+	 * Note: For any allocation made here , the changes must be reflected in
+	 * hds_core_state.global_pool_info as well as in hds_global_resource_state.
+	 * ------------------------------------------------------------------
+	 *
+	 * 1. check if memory is available in hds_core_state.global_memory_pool_info
+	 * 2. Look into free pool if we can allocate a contiguous space.
+	 * 3. if not , start searching for free mem blocks in hds_core_state.mem_block_list
+	 * 		See if any such block can meet our requirement using <best fit strategy>.
+	 * 4. If still our requirement is not met, (but memory is available, most
+	 * 		probably because it's in smaller freed blocks, but these blocks
+	 * 		have not yet been merged).
+	 * 5. If step 4, then  initiate memory_compaction and see from step 2,
+	 * 		if our requirement can be met now.
+	 * 6. If still, our requirement is not met (and memory is available), then
+	 * 		something went wrong. Throw EXCEPTION.
+	 * 7. If all OK, do the allocation, update hds_core_state.global_pool_info,
+	 * 		hds_core_state.mem_blocks_list and hds_global_resource_state.
+	 * 		Finally return the mem_handle.
+	 *
+	 * mem_block.start_pos and mem_block.end_pos both are inclusive to a process.
+	 * For e.g. if for a process (start=12,end=25) then memory_size is
+	 * (25-12 +1) = 14 .
+	 *
+	 */
+}
+void free_mem(unsigned int pid,MEM_HANDLE mem_handle){
+	/*
+	 * 1. Check if this mem_handle is valid and that it indeed belongs to
+	 *  	this PID (Security ?).
+	 * 2. If yes, then mark this block as inactive by setting the PID of this
+	 * 		handle to -1.
+	 *
+	 */
+}
+/**
+ * @brief This routine performs memory compaction. It tries to add all freed
+ * 			blocks to contigous free pool while maintaining the same PID to
+ * 			mem_handle mapping. It will merge the smaller free blocks back to
+ * 			the global_memory_pool.
+ *
+ */
+void _cosolidate_memory(){
+	/*
+	 * 1. We will keep the mem_handle to PID mapping same and size of all active
+	 * 		blocks also cant change. Usual attributes can change. (Right ?)
+	 *   Only change will be mem_block.start_pos and mem_block.end_pos.
+	 * 2. How to do it ?
+	 * 		2.1) Sort all such blocks based on their start pos.
+	 * 		2.2) Then arrange all blocks in the increasing order of start_pos
+	 * 			 while allocating correct <size> of memory.
+	 *
+	 * 	For e.g.
+	 * 	 p1(5,9) ,p2(2,3), p3(12-15), p4(22-25)
+	 * 	 Then sort then as per their start pos.
+	 * 	 ->    p2(2,3) , p1(5,9) p3(12,15) p4(22,25)
+	 * 	sizes:    2          5         4         4          :(end_pos-start_pos+1)
+	 *
+	 *	Compact: p2(65,67),p2(68,73),p3(74,78),p4(79,83)  ... free_pool_start = 84
+	 * 	Now assumming entire pool has been reset, start allocating from position
+	 * 	65 (since first 64 MB is reserved for realtime processes.)
+	 * 	allocation can be made as :
+	 * 	--------------------
+	 * 	free_pool_start_index =65
+	 * 	for node in sorted_mem_block_list:
+	 * 		  mem_size_of_cur_node = node.end_pos - node.start_pos + 1
+	 * 		  node.start_pos = free_pool_start_index
+	 * 		  node.end_pos = node.start_pos + mem_size_of_cur_node
+	 * 		  free_pool_start_index = free_pool_start_index + mem_size_of_cur_node
+	 *
+	 * 	#end of compaction.
+	 */
 }

@@ -19,7 +19,10 @@ static int insert_process_to_q_from_user_job_q(struct process_queue_t **qhead,
 		struct process_queue_t *process_frm_user_jobq);
 static int remove_first_ele_from_user_job_q(struct process_queue_t **user_job_q);
 void init_hds_resource_state() {
-	hds_resource_state.avail_memory = hds_config.max_resources.memory;
+	// available _memory will at any point be less than 64 MB. Since that much
+	// we are reserving for realtime processes.
+	hds_resource_state.avail_memory = hds_config.max_resources.memory-64;
+
 	hds_resource_state.avail_printer = hds_config.max_resources.printer;
 	hds_resource_state.avail_scanner = hds_config.max_resources.scanner;
 }
@@ -62,6 +65,19 @@ void init_hds_core_state() {
 //															  //time we are running
 	hds_core_state.active_process_valid =
 			hds_core_state.next_to_run_process_valid = false;
+
+	// Initialize global memory pool info.
+	hds_core_state.mem_block_list = hds_core_state.mem_block_list_last = NULL;
+	hds_core_state.global_memory_info.max_mem_size = (hds_resource_state.avail_memory);
+	hds_core_state.global_memory_info.mem_available = hds_core_state.global_memory_info.max_mem_size;
+	hds_core_state.global_memory_info.mem_block_id_counter = 1;
+	/*
+	 * We will first 64 MB for realtime processes. So free_pool will start from
+	 * 65 till hds_config.max_resources.memory
+	 */
+	hds_core_state.global_memory_info.free_pool_start = 65;
+	hds_core_state.global_memory_info.free_pool_start = hds_config.max_resources.memory;
+
 }
 /**
  * @brief Main routine for dispatcher thread
@@ -785,6 +801,14 @@ void *hds_cpu(void *args) {
 	 * and looking for a process with pid > 1.
 	 */
 	pthread_exit(NULL );
+}
+
+void process_loader(){
+	/*
+	 * 1. This routine must do all the resource allocation for a given process.
+	 * 	   Therefore it will recieve a process structure which will define the
+	 * 	   resource requirements for that process.
+	 */
 }
 static void child_function() {
 	/*

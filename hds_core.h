@@ -26,13 +26,33 @@ struct process_queue_t{
 	 	 	 	 	 	 it will have a valid pid. It could be in either suspended/running state.*/
 	struct process_queue_t *next;
 };
-
+struct global_memory_pool_info_t{
+	unsigned int max_mem_size;
+	unsigned int mem_available;
+	unsigned int free_pool_start;
+	unsigned int free_pool_end;
+	unsigned int mem_block_id_counter;
+};
+struct mem_block_t{
+	unsigned int mem_block_id; /**< A unique id of this block. */
+	int pid; /**< Indicates the PID of the process to which this block belongs.
+				Set to -1 to indicate that this block is free */
+	unsigned int size; /**< Size of this block. For sake of simplicity, we assume that
+	 	 	 	 	 	 	 every memory request is in MB and that every allocation request
+	 	 	 	 	 	 	 will be positive integer only.*/
+	unsigned int start_pos; /**< Beginning position for this block. */
+	unsigned int end_pos; /**< End position for this block.*/
+	struct mem_block_t *next;
+};
 struct hds_core_state_t{
 	struct process_queue_t *rtq,*rtq_last;
 	struct process_queue_t *user_job_q,*user_job_q_last;
 	struct process_queue_t *p1q,*p1q_last;
 	struct process_queue_t *p2q,*p2q_last;
 	struct process_queue_t *p3q,*p3q_last;
+
+	struct global_memory_pool_info_t global_memory_info;
+	struct mem_block_t *mem_block_list,*mem_block_list_last;
 
 	//mutexes for ensuring exclusive access to the process queues
 	pthread_mutex_t rtq_mutex;

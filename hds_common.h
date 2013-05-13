@@ -206,6 +206,6 @@ int open_log_file();
 void write_to_result_window(const char* msg,int num_rows);
 void print_help();
 void execute_commands(const char *command);
-
+void clear_result_window();
 
 #endif

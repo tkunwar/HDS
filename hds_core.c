@@ -20,6 +20,19 @@ static int insert_process_to_q_from_user_job_q(struct process_queue_t **qhead,
 static int remove_first_ele_from_user_job_q(struct process_queue_t **user_job_q);
 static int allocate_resources(struct process_queue_t *process);
 static int free_resources(struct process_queue_t *process);
+static int insert_mem_block_to_list(struct mem_block_t *mblock_to_attached);
+static int find_smallest_free_mblock(unsigned int pid, int mem_req);
+static void _consolidate_memory();
+static int allocate_from_free_pool(unsigned int pid, int mem_req);
+static void cleanup_mem_block_list();
+static MEM_HANDLE allocate_mem(unsigned int pid, unsigned int mem_req);
+void print_memory_maps();
+
+struct mem_block_t* SortedMerge(struct mem_block_t* a, struct mem_block_t* b);
+void FrontBackSplit(struct mem_block_t* source, struct mem_block_t** frontRef,
+		struct mem_block_t** backRef);
+void MergeSort(struct mem_block_t** headRef);
+
 void init_hds_resource_state() {
 	// available _memory will at any point be less than 64 MB. Since that much
 	// we are reserving for realtime processes.
@@ -84,7 +97,6 @@ void init_hds_core_state() {
 	hds_core_state.global_memory_info.free_pool_start = 65;
 	hds_core_state.global_memory_info.free_pool_end =
 			hds_config.max_resources.memory; // should always point to hds_config.max_resources.memory
-
 
 }
 /**
@@ -653,14 +665,14 @@ void *hds_cpu(void *args) {
 			if ((hds_core_state.next_to_run_process.priority
 					< hds_core_state.active_process.priority)
 					&& (hds_core_state.next_to_run_process_valid == true)) {
-//				var_debug(
-//						"cpu: Interrupting active process with process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
-//						hds_core_state.next_to_run_process.pid,
-//						hds_core_state.next_to_run_process.priority,
-//						hds_core_state.next_to_run_process.cpu_req,
-//						hds_core_state.next_to_run_process.memory_req,
-//						hds_core_state.next_to_run_process.printer_req,
-//						hds_core_state.next_to_run_process.scanner_req);
+				var_debug(
+						"cpu: Interrupting active process with process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
+						hds_core_state.next_to_run_process.pid,
+						hds_core_state.next_to_run_process.priority,
+						hds_core_state.next_to_run_process.cpu_req,
+						hds_core_state.next_to_run_process.memory_req,
+						hds_core_state.next_to_run_process.printer_req,
+						hds_core_state.next_to_run_process.scanner_req);
 				//current process will be interrupted.
 				degrade_priority_and_save_to_q(&hds_core_state.active_process);
 				pthread_mutex_lock(&hds_core_state.active_process_lock);
@@ -722,7 +734,7 @@ void *hds_cpu(void *args) {
 				kill(hds_core_state.active_process.pid, SIGTERM);
 
 				// *****deallocate resources *****
-
+				free_resources(&hds_core_state.active_process);
 				//collect this process
 				waitpid(hds_core_state.active_process.pid, &status, WNOHANG);
 
@@ -730,6 +742,7 @@ void *hds_cpu(void *args) {
 				// in next cycle
 				hds_core_state.active_process_valid = false;
 
+				print_memory_maps();
 				//now go up
 				continue;
 			} else {
@@ -755,7 +768,8 @@ void *hds_cpu(void *args) {
 			hds_core_state.active_process.pid = fork();
 			switch (hds_core_state.active_process.pid) {
 			case -1:
-				serror("cpu: fork() failed");
+				serror("cpu: fork() failed")
+				;
 				//this is bad
 				break;
 			case 0:
@@ -781,20 +795,36 @@ void *hds_cpu(void *args) {
 				 * pid.
 				 */
 				// ****do the resource allocation here ******
+				if (allocate_resources(&hds_core_state.active_process) != HDS_OK) {
+					serror("Resource allocation failed.");
+					var_debug("cpu: killing premature child process: %d",
+							hds_core_state.active_process.pid);
+					kill(hds_core_state.active_process.pid, SIGCONT);
+					kill(hds_core_state.active_process.pid, SIGTERM);
 
+					waitpid(hds_core_state.active_process.pid, &status,
+							WNOHANG);
+
+					//invalidate it, such that it will be set as next_to_run process
+					// in next cycle
+					hds_core_state.active_process_valid = false;
+					//now go up
+					continue;
+				}
+				print_memory_maps();
 				break;
 			}
 		}
 		// The code following next, will never be executed in child.
 		// if not then, behaviour is undefined
-//		var_debug(
-//				"cpu: Going to run process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
-//				hds_core_state.active_process.pid,
-//				hds_core_state.active_process.priority,
-//				hds_core_state.active_process.cpu_req,
-//				hds_core_state.active_process.memory_req,
-//				hds_core_state.active_process.printer_req,
-//				hds_core_state.active_process.scanner_req);
+		var_debug(
+				"cpu: Going to run process(PID:%d PRI:%d CPU:%d MEM:%d PRN:%d SCN:%d)",
+				hds_core_state.active_process.pid,
+				hds_core_state.active_process.priority,
+				hds_core_state.active_process.cpu_req,
+				hds_core_state.active_process.memory_req,
+				hds_core_state.active_process.printer_req,
+				hds_core_state.active_process.scanner_req);
 
 		//now run the child process
 		kill(hds_core_state.active_process.pid, SIGCONT);
@@ -813,6 +843,8 @@ void *hds_cpu(void *args) {
 	 * spwaned and kill them. we can find such processes by examining all 4 queues
 	 * and looking for a process with pid > 1.
 	 */
+	sdebug("cpu: Cleaning up mem_block_list");
+	cleanup_mem_block_list(hds_core_state.mem_block_list);
 	pthread_exit(NULL );
 }
 /**
@@ -826,7 +858,12 @@ static int allocate_resources(struct process_queue_t *process) {
 		return HDS_ERR_INVALID_PROCESS;
 	}
 	//begin memory allocation for this routine.
+	if ((mem_handle = allocate_mem(process->pid, process->memory_req)) == 0) {
+		return HDS_ERR_NO_RESOURCE;
+	}
 
+	//mem_handle is a valid one
+	process->allocate_resource.mem_block_handle = mem_handle;
 	return HDS_OK;
 }
 /**
@@ -834,8 +871,9 @@ static int allocate_resources(struct process_queue_t *process) {
  * @param process The process which is to be dealocated.
  * @return
  */
-static int free_resources(struct process_queue_t *process){
-
+static int free_resources(struct process_queue_t *process) {
+	// as of now we only free memory allocated to this process
+	free_mem(process->pid, process->allocate_resource.mem_block_handle);
 	return HDS_OK;
 }
 static void child_function() {
@@ -1030,7 +1068,7 @@ void *hds_stats_manager(void *args) {
  * @param mem_req Memory required in MBs.
  * @return A memory handle on success or 0 indicating failure.
  */
-MEM_HANDLE allocate_mem(unsigned int pid,unsigned int mem_req){
+MEM_HANDLE allocate_mem(unsigned int pid, unsigned int mem_req) {
 	/*
 	 * Note: For any allocation made here , the changes must be reflected in
 	 * hds_core_state.global_pool_info as well as in hds_global_resource_state.
@@ -1048,7 +1086,7 @@ MEM_HANDLE allocate_mem(unsigned int pid,unsigned int mem_req){
 	 * 6. If still, our requirement is not met (and memory is available), then
 	 * 		something went wrong. Throw EXCEPTION.
 	 * 7. If all OK, do the allocation, update hds_core_state.global_pool_info,
-	 * 		hds_core_state.mem_blocks_list and hds_global_resource_state.
+	 * 		hds_core_state.mem_blocks_list and max_available_resource.memory.
 	 * 		Finally return the mem_handle.
 	 *
 	 * mem_block.start_pos and mem_block.end_pos both are inclusive to a process.
@@ -1056,20 +1094,193 @@ MEM_HANDLE allocate_mem(unsigned int pid,unsigned int mem_req){
 	 * (25-12 +1) = 14 .
 	 *
 	 */
-	if (hds_core_state.global_memory_info.mem_available <mem_req){
+	unsigned int mem_handle;
+	if (hds_core_state.global_memory_info.mem_available < mem_req) {
 		return 0;
 	}
-	//check free pool
 
+	//1. try allocating from pool
+	mem_handle = allocate_from_free_pool(pid, mem_req);
+	if (mem_handle) {
+		return mem_handle;
+	}
+
+	//2. Not enough memory available in free pool as contigous space
+	// check for freed blocks
+	mem_handle = find_smallest_free_mblock(pid, mem_req);
+	if (mem_handle != -1) {
+		var_debug("Found handle %d using best-fit for pid: %d", mem_handle, pid);
+		return mem_handle;
+	}
+
+	//3. We could not find a free mem_block which has sufficient space to
+	// fulfill this request. Now we will try to perform memory compaction
+	// again check if we can allocate from free pool.
+	_consolidate_memory();
+
+	//4. Since we have done compaction, there should have been some space in
+	// free pool
+	mem_handle = allocate_from_free_pool(pid, mem_req);
+	if (!mem_handle) {
+		//this is bad.
+		var_error("Out of Memory. Request:(pid=%d,req=%d)", pid, mem_req);
+		return 0;
+	}
+	return mem_handle;
 }
-void free_mem(unsigned int pid,MEM_HANDLE mem_handle){
+static int allocate_from_free_pool(unsigned int pid, int mem_req) {
+	struct mem_block_t mb;
+	//check free pool for contiguous free space
+	int mem_available = hds_core_state.global_memory_info.free_pool_end
+			- hds_core_state.global_memory_info.free_pool_start + 1;
+
+	if (mem_available >= mem_req) {
+		//allocating from free pool
+		mb.pid = pid;
+		mb.size = mem_req;
+		mb.start_pos = hds_core_state.global_memory_info.free_pool_start;
+		mb.end_pos = mb.start_pos + mb.size - 1;
+
+		//now attach a node to hds_core_state.mem_block_list
+		if (insert_mem_block_to_list(&mb) != HDS_OK)
+			return 0; //return 0 as mem_handle in case of failure
+		else {
+			//lets update global resources
+			hds_core_state.global_memory_info.free_pool_start = mb.end_pos + 1;
+			hds_core_state.global_memory_info.mem_available =
+					hds_core_state.global_memory_info.mem_available - mb.size;
+			max_available_resource.avail_memory =
+					max_available_resource.avail_memory - mb.size;
+			var_debug("Created new handle %d from free pool for pid: %d",
+					mb.mem_block_id, pid);
+			return mb.mem_block_id;
+		}
+	}
+	return 0;
+}
+static int insert_mem_block_to_list(struct mem_block_t *mblock_to_attached) {
+	struct mem_block_t *node = NULL;
+	node = (struct mem_block_t *) malloc(sizeof(struct mem_block_t));
+	if (!node) {
+		serror("malloc: failed ");
+		return HDS_ERR_NO_MEM;
+	}
+	//fill up proper values
+	node->mem_block_id = hds_core_state.global_memory_info.mem_block_id_counter;
+	// also modify mblock_to_attached so that we let the caller have
+	// the mem_block_handle
+	mblock_to_attached->mem_block_id =
+			hds_core_state.global_memory_info.mem_block_id_counter;
+	hds_core_state.global_memory_info.mem_block_id_counter++;
+
+	node->pid = mblock_to_attached->pid;
+	node->size = mblock_to_attached->size;
+	node->start_pos = mblock_to_attached->start_pos;
+	node->end_pos = mblock_to_attached->end_pos;
+	node->next = NULL;
+
+	if (!hds_core_state.mem_block_list || !hds_core_state.mem_block_list_last) {
+		//initial state
+		hds_core_state.mem_block_list = hds_core_state.mem_block_list_last =
+				node;
+	} else {
+		hds_core_state.mem_block_list_last->next = node;
+		hds_core_state.mem_block_list_last = node;
+		hds_core_state.mem_block_list_last->next = NULL;
+	}
+	return HDS_OK;
+}
+/**
+ * @brief finds the smallest memory block in hds_core_state.mem_block_list using
+ *        best fit strategy.
+ * @param mem_req The amount of memory required.
+ * @param pid PID for which this request is being made.
+ * @return Return the mem_block_id as memory handle after marking this page
+ *          as belonging to this PID.
+ */
+static int find_smallest_free_mblock(unsigned int pid, int mem_req) {
+	/*
+	 * A free block is identified as one for which pid is set to -1.
+	 */
+	struct mem_block_t *node = hds_core_state.mem_block_list;
+	if (!node)
+		return -1;
+	struct mem_block_t *smallest_free_mblock = NULL;
+	//iterate over list of mem_blocks and find the smallest free block
+	while (node) {
+		// only consider nodes which are free and have sufficient size to meet
+		// current request
+		if ((node->pid == -1) && ((node->size) >= mem_req)) {
+			if (!smallest_free_mblock) {
+				//initial case
+				smallest_free_mblock = node;
+			} else {
+				// smallest possible node using best-fit strategy
+				if ((smallest_free_mblock->size) > (node->size)) {
+					smallest_free_mblock = node;
+				}
+			}
+		}
+		node = node->next;
+	}
+	if (!smallest_free_mblock) {
+		return -1;
+	} else {
+		//make this block valid and associate it with this pid
+		smallest_free_mblock->pid = pid;
+		return smallest_free_mblock->mem_block_id;
+	}
+}
+void free_mem(unsigned int pid, MEM_HANDLE mem_handle) {
 	/*
 	 * 1. Check if this mem_handle is valid and that it indeed belongs to
 	 *  	this PID (Security ?).
 	 * 2. If yes, then mark this block as inactive by setting the PID of this
 	 * 		handle to -1.
-	 *
 	 */
+	struct mem_block_t *mb = hds_core_state.mem_block_list;
+	if (!mb) {
+		swarn("No mem_block_list: Invalid free() request.");
+		return;
+	}
+	var_debug("free(): request from: pid %d handle: %d",pid,mem_handle);
+	while (mb) {
+		if (mb->mem_block_id == mem_handle) {
+			//check if this handle indeed belongs to this pid
+			if (mb->pid == pid) {
+				//free up this block
+				var_debug("Freeing mem_block: %d", mem_handle);
+				mb->pid = -1;
+				return;
+			} else {
+				// this is an access violation
+				var_error(
+						"Memory access violation: pid: %d tried to free handle %d, which does not belong to it.",
+						pid, mem_handle);
+				return;
+			}
+		}
+		mb = mb->next;
+	}
+}
+/**
+ * @brief Cleanup the mem_block_list present in hds_core_state
+ */
+static void cleanup_mem_block_list(struct mem_block_t *mblock_list){
+	struct mem_block_t *prev_node = mblock_list, *cur_node = mblock_list;
+		if (!mblock_list){
+			hds_core_state.mem_block_list_last = NULL;
+			return ;
+		}
+		print_memory_maps();
+
+		do {
+			prev_node = cur_node;
+			cur_node = cur_node->next;
+			free(prev_node);
+		} while (cur_node);
+		//we have emptied page_table so set the pointer to null.
+		hds_core_state.mem_block_list = hds_core_state.mem_block_list_last = NULL;
 }
 /**
  * @brief This routine performs memory compaction. It tries to add all freed
@@ -1078,7 +1289,7 @@ void free_mem(unsigned int pid,MEM_HANDLE mem_handle){
  * 			the global_memory_pool.
  *
  */
-void _cosolidate_memory(){
+static void _consolidate_memory() {
 	/*
 	 * 1. We will keep the mem_handle to PID mapping same and size of all active
 	 * 		blocks also cant change. Usual attributes can change. (Right ?)
@@ -1108,4 +1319,111 @@ void _cosolidate_memory(){
 	 *
 	 * 	#end of compaction.
 	 */
+	struct mem_block_t *mb = NULL;
+	unsigned int size;
+	sdebug("Performing memory compaction.");
+	//1. sort the mem_block_list
+	MergeSort(&hds_core_state.mem_block_list);
+	mb = hds_core_state.mem_block_list;
+
+	hds_core_state.global_memory_info.free_pool_start = 65;
+
+	while (mb) {
+		size = mb->size;
+		mb->start_pos = hds_core_state.global_memory_info.free_pool_start;
+		mb->end_pos = mb->start_pos + size - 1;
+		hds_core_state.global_memory_info.free_pool_start =
+				hds_core_state.global_memory_info.free_pool_start + size;
+		mb = mb->next;
+	}
 }
+void print_memory_maps(){
+	struct mem_block_t *node = NULL;
+	if (!hds_core_state.mem_block_list){
+		return;
+	}
+	node = hds_core_state.mem_block_list;
+	sdebug("mem_handle\tpid\tsize\tstart_pos\tend_pos");
+	while(node){
+		var_debug("%d\t%d\t%d\t%d\t%d",node->mem_block_id,node->pid,node->size,node->start_pos,node->end_pos);
+		node= node->next;
+	}
+}
+/**
+ * @brief The merge sort routine.
+ * @param headRef The pointer to first mblock in the list.
+ */
+void MergeSort(struct mem_block_t** headRef) {
+	struct mem_block_t* head = *headRef;
+	struct mem_block_t* a;
+	struct mem_block_t* b;
+
+	if ((head == NULL )|| (head->next == NULL)){
+	return;
+}
+
+	FrontBackSplit(head, &a, &b);
+
+	MergeSort(&a);
+	MergeSort(&b);
+
+	*headRef = SortedMerge(a, b);
+}
+/**
+ * @brief Merge two sorted sub-lists. This routine is invoked when recursion is
+ * 		  winding up.
+ * @param a The first sub-list
+ * @param b The second sub-list
+ * @return The merged list
+ */
+struct mem_block_t* SortedMerge(struct mem_block_t* a, struct mem_block_t* b) {
+	struct mem_block_t* result = NULL;
+
+	if (a == NULL )
+		return (b);
+	else if (b == NULL )
+		return (a);
+
+	if (a->start_pos <= b->start_pos) {
+		result = a;
+		result->next = SortedMerge(a->next, b);
+	} else {
+		result = b;
+		result->next = SortedMerge(a, b->next);
+	}
+	return (result);
+}
+
+/**
+ * @brief This routine splits a given linked list in to two halves. If the
+ * 			length is odd, the extra node should go in the front list. Uses
+ * 			the fast/slow pointer strategy.
+ * @param source The list which is to be split.
+ * @param frontRef The first sub-list after splitting
+ * @param backRef The second sub-list after splitting
+ */
+void FrontBackSplit(struct mem_block_t* source, struct mem_block_t** frontRef,
+		struct mem_block_t** backRef) {
+	struct mem_block_t* fast;
+	struct mem_block_t* slow;
+	if (source == NULL || source->next == NULL ) {
+		*frontRef = source;
+		*backRef = NULL;
+	} else {
+		slow = source;
+		fast = source->next;
+
+		while (fast != NULL ) {
+			fast = fast->next;
+			if (fast != NULL ) {
+				slow = slow->next;
+				fast = fast->next;
+			}
+		}
+
+		*frontRef = source;
+		*backRef = slow->next;
+		slow->next = NULL;
+	}
+}
+

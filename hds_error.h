@@ -32,6 +32,7 @@ typedef enum {
     HDS_ERR_MEM_FAULT,
     HDS_ERR_NO_SUCH_ELEMENT,
     HDS_ERR_INVALID_PROCESS,
+    HDS_ERR_NO_RESOURCE,
     HDS_ERR_GENERIC /** Generic error: not sure what it is, but it's fishy anyway*/
 } error_codes_t;
 /**
